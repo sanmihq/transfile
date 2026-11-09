@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
 import { requireAuth, type AuthVariables } from "./middleware/auth";
+import { filesRouter, usageRouter } from "./routes/files";
 
 const app = new Hono<{
   Bindings: Env;
@@ -13,7 +14,7 @@ app.use("/api/*", async (c, next) => {
     origin: c.env.WEB_ORIGIN,
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
   return middleware(c, next);
 });
@@ -25,6 +26,9 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => {
 app.get("/health", (c) => {
   return c.json({ ok: true });
 });
+
+app.route("/api/files", filesRouter);
+app.route("/api/usage", usageRouter);
 
 app.get("/api/me", requireAuth, (c) => {
   const user = c.get("user");
