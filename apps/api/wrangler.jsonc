@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "api",
+	"name": "transfile-api",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-11-09",
 	"triggers": {
@@ -10,7 +10,8 @@
 		{
 			"binding": "DB",
 			"database_name": "transfile-db",
-			"database_id": "e8479d51-259c-4ae2-8983-7a881907c60c"
+			"database_id": "e8479d51-259c-4ae2-8983-7a881907c60c",
+			"migrations_dir": "drizzle"
 		}
 	]
 	// "compatibility_flags": [
