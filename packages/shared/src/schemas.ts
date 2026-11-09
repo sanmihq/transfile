@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { MAX_FILE_BYTES, MAX_FILENAME_LENGTH } from "./constants";
+import {
+  MAX_FILE_BYTES,
+  MAX_FILENAME_LENGTH,
+  MAX_FOLDER_NAME_LENGTH,
+} from "./constants";
 
 const fileNameSchema = z.string().trim().min(1).max(MAX_FILENAME_LENGTH);
 const folderIdSchema = z.string().min(1).nullable();
@@ -28,6 +32,44 @@ export const listFilesQuerySchema = z.object({
       value === undefined || value === "root" ? null : value,
     ),
 });
+
+const folderNameSchema = z.string().trim().min(1).max(MAX_FOLDER_NAME_LENGTH);
+
+export const createFolderSchema = z.object({
+  name: folderNameSchema,
+  parentId: folderIdSchema.optional(),
+});
+
+export const updateFolderSchema = z
+  .object({
+    name: folderNameSchema.optional(),
+    parentId: folderIdSchema.optional(),
+  })
+  .refine((value) => value.name !== undefined || value.parentId !== undefined, {
+    message: "At least one field is required",
+  });
+
+export const listFolderQuerySchema = z.object({
+  parentId: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value === undefined || value === "root" ? null : value,
+    ),
+});
+
+export function sanitizeFolderName(name: string): string {
+  const stripped = name
+    .replace(/[/\\]/g, "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_FOLDER_NAME_LENGTH);
+  if (stripped === "." || stripped === "..") {
+    return "";
+  }
+  return stripped;
+}
 
 export function sanitizeFileName(name: string): string {
   const stripped = name

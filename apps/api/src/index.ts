@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { createAuth } from "./auth";
 import { requireAuth, type AuthVariables } from "./middleware/auth";
 import { filesRouter, usageRouter } from "./routes/files";
+import { foldersRouter } from "./routes/folders";
 
 const app = new Hono<{
   Bindings: Env;
@@ -28,6 +29,7 @@ app.get("/health", (c) => {
 });
 
 app.route("/api/files", filesRouter);
+app.route("/api/folders", foldersRouter);
 app.route("/api/usage", usageRouter);
 
 app.get("/api/me", requireAuth, (c) => {

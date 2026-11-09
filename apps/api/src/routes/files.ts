@@ -9,7 +9,8 @@ import {
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-import { files, folders } from "../db/schema";
+import { files } from "../db/schema";
+import { getOwnedFolder } from "../lib/folders";
 import type { AuthVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { attachmentContentDisposition } from "../storage/content-disposition";
@@ -41,12 +42,8 @@ async function folderBelongsToUser(
   userId: string,
   folderId: string,
 ): Promise<boolean> {
-  const [folder] = await database(env)
-    .select({ id: folders.id })
-    .from(folders)
-    .where(and(eq(folders.id, folderId), eq(folders.userId, userId)))
-    .limit(1);
-  return folder !== undefined;
+  const folder = await getOwnedFolder(database(env), userId, folderId);
+  return folder !== null;
 }
 
 async function usedBytes(env: Env, userId: string): Promise<number> {
