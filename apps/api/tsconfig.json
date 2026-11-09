@@ -5,10 +5,14 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "skipLibCheck": true,
-    "lib": [
-      "ESNext"
-    ],
+    "lib": ["ESNext"],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx"
   },
+  "include": [
+    "src/**/*.ts",
+    "drizzle.config.ts",
+    "better-auth.config.ts",
+    "worker-configuration.d.ts"
+  ]
 }

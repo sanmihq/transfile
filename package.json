@@ -11,5 +11,8 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.6.0"
+  "packageManager": "pnpm@10.6.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "workerd"]
+  }
 }

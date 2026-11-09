@@ -4,16 +4,20 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
   },
   "dependencies": {
     "@transfile/shared": "workspace:^",
+    "better-auth": "^1.7.18",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.16",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261109.1",
     "drizzle-kit": "^0.31.11",
+    "typescript": "~6.0.3",
     "wrangler": "^4.159.0"
   }
 }

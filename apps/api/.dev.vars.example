@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local development. Leave these empty in git.
+BETTER_AUTH_SECRET=
+BETTER_AUTH_URL=
+WEB_ORIGIN=

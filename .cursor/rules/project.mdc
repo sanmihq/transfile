@@ -11,14 +11,16 @@ Rules:
 - TypeScript strict. No `any`.
 - Validate ALL request input with Zod schemas from packages/shared.
 - All DB access via Drizzle. Never build SQL from user input.
+- Auth uses Better Auth. Do not hand-roll sessions or password hashing.
 - Every route touching a file/folder/share MUST verify the user owns it.
 - Never trust client-reported file sizes: verify against R2 after upload.
-- Hash passwords with Web Crypto (PBKDF2). Free Worker CPU limit is ~10ms.
+- Free Worker CPU limit is ~10ms: avoid heavy work in requests.
 - Uploads/downloads use presigned R2 URLs, never streamed through the Worker.
 - Read SPEC.md before implementing. One feature per session.
 
 UI:
-- shadcn/ui + Tailwind only. Restyle base components once in components/ui.
+- shadcn/ui (Radix, Maia preset) + Tailwind only. Restyle base components
+  once in components/ui.
 - Rounded-3xl cards, rounded-full buttons, soft gray surfaces on white,
   soft shadows, minimal borders. Dark primary button, blue accent, green for
   success/progress. No glows, gradient borders or decorative animation.
