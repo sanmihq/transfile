@@ -14,7 +14,8 @@ import { getOwnedFolder } from "../lib/folders";
 import type { AuthVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { attachmentContentDisposition } from "../storage/content-disposition";
-import { getStorage } from "../storage";
+import { requireFilesBinding } from "../storage/env";
+import { getStorage, isS3Mode } from "../storage";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
@@ -121,7 +122,7 @@ filesRouter.post("/upload-url", async (c) => {
 });
 
 filesRouter.put("/:id/content", async (c) => {
-  if (c.env.STORAGE_MODE === "presigned") {
+  if (isS3Mode(c.env)) {
     return c.json({ error: "Not found" }, 404);
   }
   const userId = c.get("user").id;
@@ -159,7 +160,7 @@ filesRouter.put("/:id/content", async (c) => {
     return c.json({ error: "Invalid request" }, 400);
   }
 
-  await c.env.FILES.put(file.r2Key, body, {
+  await requireFilesBinding(c.env).put(file.r2Key, body, {
     httpMetadata: { contentType: "application/octet-stream" },
   });
   return c.body(null, 204);
@@ -241,7 +242,7 @@ filesRouter.get("/:id/download-url", async (c) => {
 });
 
 filesRouter.get("/:id/content", async (c) => {
-  if (c.env.STORAGE_MODE === "presigned") {
+  if (isS3Mode(c.env)) {
     return c.json({ error: "Not found" }, 404);
   }
   const userId = c.get("user").id;
@@ -262,7 +263,7 @@ filesRouter.get("/:id/content", async (c) => {
     return c.json({ error: "Not found" }, 404);
   }
 
-  const object = await c.env.FILES.get(file.r2Key);
+  const object = await requireFilesBinding(c.env).get(file.r2Key);
   if (!object) {
     return c.json({ error: "Not found" }, 404);
   }

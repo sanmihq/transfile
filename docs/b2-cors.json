@@ -1,0 +1,10 @@
+[
+  {
+    "corsRuleName": "transfile-web",
+    "allowedOrigins": ["http://localhost:5173"],
+    "allowedOperations": ["s3_put", "s3_get", "s3_head"],
+    "allowedHeaders": ["*"],
+    "exposeHeaders": ["ETag"],
+    "maxAgeSeconds": 3600
+  }
+]

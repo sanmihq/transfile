@@ -1,7 +1,12 @@
+import { requireFilesBinding, type StorageEnv } from "./env";
 import type { Storage, UploadTarget } from "./types";
 
 export class WorkerStorage implements Storage {
-  constructor(private readonly env: Env) {}
+  private readonly files: R2Bucket;
+
+  constructor(env: StorageEnv) {
+    this.files = requireFilesBinding(env);
+  }
 
   createUpload(args: {
     key: string;
@@ -29,7 +34,7 @@ export class WorkerStorage implements Storage {
   }
 
   async head(key: string): Promise<{ size: number } | null> {
-    const object = await this.env.FILES.head(key);
+    const object = await this.files.head(key);
     if (!object) {
       return null;
     }
@@ -37,6 +42,6 @@ export class WorkerStorage implements Storage {
   }
 
   async delete(key: string): Promise<void> {
-    await this.env.FILES.delete(key);
+    await this.files.delete(key);
   }
 }

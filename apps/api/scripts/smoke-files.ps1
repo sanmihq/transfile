@@ -13,6 +13,23 @@ function Write-Check {
   }
 }
 
+function Test-DirectStorageUrl {
+  param([string]$Uri)
+  $target = [Uri]$Uri
+  $api = [Uri]$base
+  return $target.Host -ne $api.Host
+}
+
+function Get-UploadHeaders {
+  param($Upload)
+  $headers = @{}
+  if ($null -eq $Upload -or $null -eq $Upload.headers) { return $headers }
+  foreach ($property in $Upload.headers.PSObject.Properties) {
+    $headers[$property.Name] = [string]$property.Value
+  }
+  return $headers
+}
+
 function Get-Response {
   param(
     [string]$Method = "GET",
@@ -20,14 +37,25 @@ function Get-Response {
     $Session,
     [string]$Body,
     [string]$InFile,
-    [string]$OutFile
+    [string]$OutFile,
+    [hashtable]$ExtraHeaders,
+    [switch]$Direct
   )
+  $headers = @{}
+  if (-not $Direct) {
+    $headers["Origin"] = "http://localhost:5173"
+  }
+  if ($null -ne $ExtraHeaders) {
+    foreach ($key in @($ExtraHeaders.Keys)) {
+      $headers[$key] = [string]$ExtraHeaders[$key]
+    }
+  }
   $params = @{
     Method = $Method
     Uri = $Uri
-    Headers = $origin
   }
-  if ($null -ne $Session) { $params.WebSession = $Session }
+  if ($headers.Count -gt 0) { $params.Headers = $headers }
+  if ($null -ne $Session -and -not $Direct) { $params.WebSession = $Session }
   if ($Body -ne "") {
     $params.ContentType = "application/json"
     $params.Body = $Body
@@ -94,7 +122,13 @@ if ($created.Status -ne 201) {
   exit 1
 }
 $createdJson = $created.Content | ConvertFrom-Json
-$put = Get-Response -Method PUT -Uri $createdJson.upload.url -Session $sessionA -InFile $source
+$uploadDirect = Test-DirectStorageUrl $createdJson.upload.url
+$uploadHeaders = Get-UploadHeaders $createdJson.upload
+if ($uploadDirect) {
+  $put = Get-Response -Method PUT -Uri $createdJson.upload.url -InFile $source -ExtraHeaders $uploadHeaders -Direct
+} else {
+  $put = Get-Response -Method PUT -Uri $createdJson.upload.url -Session $sessionA -InFile $source
+}
 $complete = Get-Response -Method POST -Uri "$base/api/files/$($createdJson.file.id)/complete" -Session $sessionA
 Write-Check "A upload put and complete" ($put.Status -eq 204 -and $complete.Status -eq 200) "put=$($put.Status) complete=$($complete.Status) $($complete.Content)"
 
@@ -107,7 +141,11 @@ $downloadMeta = Get-Response -Uri "$base/api/files/$($createdJson.file.id)/downl
 $downloadUrl = ""
 if ($downloadMeta.Status -eq 200) {
   $downloadUrl = ($downloadMeta.Content | ConvertFrom-Json).url
-  Get-Response -Uri $downloadUrl -Session $sessionA -OutFile $downloaded | Out-Null
+  if (Test-DirectStorageUrl $downloadUrl) {
+    Get-Response -Uri $downloadUrl -OutFile $downloaded -Direct | Out-Null
+  } else {
+    Get-Response -Uri $downloadUrl -Session $sessionA -OutFile $downloaded | Out-Null
+  }
 }
 $hashOk = $false
 if (Test-Path $downloaded) {
@@ -154,9 +192,19 @@ Write-Check "size above 100 MB is rejected" ($overMax.Status -eq 400) "status=$(
 $short = Get-Response -Method POST -Uri "$base/api/files/upload-url" -Session $sessionA -Body '{"name":"short.bin","size":1000}'
 $shortRejected = $false
 if ($short.Status -eq 201) {
-  $shortUrl = ($short.Content | ConvertFrom-Json).upload.url
-  $shortPut = Get-Response -Method PUT -Uri $shortUrl -Session $sessionA -InFile $tooBig
+  $shortJson = $short.Content | ConvertFrom-Json
+  $shortUrl = $shortJson.upload.url
+  $shortHeaders = Get-UploadHeaders $shortJson.upload
+  if (Test-DirectStorageUrl $shortUrl) {
+    $shortPut = Get-Response -Method PUT -Uri $shortUrl -InFile $tooBig -ExtraHeaders $shortHeaders -Direct
+  } else {
+    $shortPut = Get-Response -Method PUT -Uri $shortUrl -Session $sessionA -InFile $tooBig
+  }
   $shortRejected = $shortPut.Status -eq 413 -or $shortPut.Status -eq 400
+  if (-not $shortRejected -and $shortPut.Status -ge 200 -and $shortPut.Status -lt 300) {
+    $shortComplete = Get-Response -Method POST -Uri "$base/api/files/$($shortJson.file.id)/complete" -Session $sessionA
+    $shortRejected = $shortComplete.Status -eq 400
+  }
   Write-Check "PUT larger than declared size is rejected" $shortRejected "status=$($shortPut.Status) body=$($shortPut.Content)"
 } else {
   Write-Check "PUT larger than declared size is rejected" $false "upload-url status=$($short.Status) body=$($short.Content)"
