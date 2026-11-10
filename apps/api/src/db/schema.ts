@@ -68,6 +68,8 @@ export const shares = sqliteTable(
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     maxDownloads: integer("max_downloads"),
     downloadCount: integer("download_count").notNull().default(0),
+    failedAttempts: integer("failed_attempts").notNull().default(0),
+    lockedUntil: integer("locked_until", { mode: "timestamp" }),
     revokedAt: integer("revoked_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()

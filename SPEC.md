@@ -21,12 +21,24 @@ shares(id, file_id OR folder_id, token, password_hash NULL,
 
 ## API
 Auth routes handled by Better Auth (/api/auth/*)
-GET /folders/:id?   POST /folders   PATCH|DELETE /folders/:id
-POST /files/upload-url        → pending row + presigned PUT
-POST /files/:id/complete      → verify size in R2, mark ready
-GET  /files/:id/download-url  PATCH|DELETE /files/:id
-POST /shares   GET /shares   DELETE /shares/:id
-GET  /s/:token (public metadata)   POST /s/:token/unlock   GET /s/:token/download
+GET /api/folders?parentId=   GET /api/folders/all   POST /api/folders
+PATCH|DELETE /api/folders/:id
+POST /api/files/upload-url        → pending row + upload URL
+POST /api/files/:id/complete      → verify size in storage, mark ready
+GET  /api/files/:id/download-url  PATCH|DELETE /api/files/:id
+GET  /api/usage
+POST /api/shares   GET /api/shares   PATCH|DELETE /api/shares/:id
+GET  /api/s/:token                         public metadata
+POST /api/s/:token/unlock                  exchange a password for an access token
+GET  /api/s/:token/contents                folder share listing
+GET  /api/s/:token/download-url            counts one download, returns a URL
+GET  /api/s/:token/file/:grant             worker-mode bytes only
+
+Share links store the raw token so an owner can copy the same URL again.
+Password-protected links use a short-lived HMAC access token in the
+X-Share-Access header instead of a cookie, so the grant is not sent cross-site.
+Five failed unlocks lock that share for 15 minutes. Download grants last 5
+minutes and do not increment the counter again when the bytes are fetched.
 
 ## Cron (hourly)
 Delete expired shares; purge soft-deleted files >7 days from R2 + DB;

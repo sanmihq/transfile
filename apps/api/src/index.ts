@@ -4,6 +4,8 @@ import { createAuth } from "./auth";
 import { requireAuth, type AuthVariables } from "./middleware/auth";
 import { filesRouter, usageRouter } from "./routes/files";
 import { foldersRouter } from "./routes/folders";
+import { publicRouter } from "./routes/public";
+import { sharesRouter } from "./routes/shares";
 
 const app = new Hono<{
   Bindings: Env;
@@ -14,7 +16,7 @@ app.use("/api/*", async (c, next) => {
   const middleware = cors({
     origin: c.env.WEB_ORIGIN,
     credentials: true,
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Share-Access"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
   return middleware(c, next);
@@ -30,6 +32,8 @@ app.get("/health", (c) => {
 
 app.route("/api/files", filesRouter);
 app.route("/api/folders", foldersRouter);
+app.route("/api/shares", sharesRouter);
+app.route("/api/s", publicRouter);
 app.route("/api/usage", usageRouter);
 
 app.get("/api/me", requireAuth, (c) => {
