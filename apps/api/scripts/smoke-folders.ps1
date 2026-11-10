@@ -124,6 +124,7 @@ $createdJson = $created.Content | ConvertFrom-Json
 $put = Get-Response -Method PUT -Uri $createdJson.upload.url -Session $sessionA -InFile $source
 $complete = Get-Response -Method POST -Uri "$base/api/files/$($createdJson.file.id)/complete" -Session $sessionA
 $fileId = $createdJson.file.id
+$putOk = $put.Status -eq 204 -or ((([Uri]$createdJson.upload.url).Host -ne ([Uri]$base).Host) -and $put.Status -eq 200)
 $inFolder = Get-Response -Uri "$base/api/folders?parentId=$invoicesId" -Session $sessionA
 $atRoot = Get-Response -Uri "$base/api/folders?parentId=root" -Session $sessionA
 $inFolderHit = $false
@@ -134,7 +135,7 @@ if ($inFolder.Status -eq 200) {
 if ($atRoot.Status -eq 200) {
   $atRootHit = [bool](As-List (($atRoot.Content | ConvertFrom-Json).files) | Where-Object { $_.id -eq $fileId })
 }
-Write-Check "file is in Invoices and not at root" ($put.Status -eq 204 -and $complete.Status -eq 200 -and $inFolderHit -and -not $atRootHit) "put=$($put.Status) complete=$($complete.Status) $($complete.Content) inFolder=$inFolderHit atRoot=$atRootHit"
+Write-Check "file is in Invoices and not at root" ($putOk -and $complete.Status -eq 200 -and $inFolderHit -and -not $atRootHit) "put=$($put.Status) complete=$($complete.Status) inFolder=$inFolderHit atRoot=$atRootHit"
 
 $duplicate = New-Folder -Session $sessionA -Name "Projects" -ParentId ""
 $caseDuplicate = New-Folder -Session $sessionA -Name "projects" -ParentId ""

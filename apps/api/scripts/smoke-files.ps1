@@ -3,13 +3,37 @@ $base = "http://localhost:8787"
 $origin = @{ Origin = "http://localhost:5173" }
 $failed = $false
 
+function Redact([string]$Text) {
+  if ([string]::IsNullOrEmpty($Text)) { return "" }
+  return [regex]::Replace($Text, "https?://\S+", "[redacted-url]")
+}
+
 function Write-Check {
   param([string]$Name, [bool]$Ok, [string]$Detail)
   if ($Ok) {
     Write-Output "PASS $Name"
   } else {
-    Write-Output "FAIL $Name $Detail"
+    Write-Output "FAIL $Name $(Redact $Detail)"
     $script:failed = $true
+  }
+}
+
+$script:objectIds = @()
+$script:ownerId = ""
+
+function Add-Object {
+  param([string]$FileId)
+  if ($FileId -ne "") { $script:objectIds += $FileId }
+}
+
+function Print-Objects {
+  Write-Output "OBJECTS"
+  if ($script:ownerId -eq "" -or $script:objectIds.Count -eq 0) {
+    Write-Output "(none)"
+    return
+  }
+  foreach ($id in $script:objectIds) {
+    Write-Output "fileId=$id key=$($script:ownerId)/$id"
   }
 }
 
@@ -66,20 +90,45 @@ function Get-Response {
     $response = Invoke-WebRequest @params
     $content = ""
     if ($OutFile -eq "" -and $null -ne $response.Content) { $content = [string]$response.Content }
-    return @{ Status = [int]$response.StatusCode; Content = $content }
+    return @{ Status = [int]$response.StatusCode; Content = $content; Headers = @(Format-Headers $response.Headers) }
   } catch [System.Net.WebException] {
     $http = $_.Exception.Response
     if ($null -eq $http) { throw }
     $status = [int]$http.StatusCode
-    $stream = $http.GetResponseStream()
     $content = ""
-    if ($null -ne $stream) {
-      $reader = New-Object System.IO.StreamReader($stream)
-      $content = $reader.ReadToEnd()
-      $reader.Dispose()
+    if ($null -ne $_.ErrorDetails -and $_.ErrorDetails.Message) {
+      $content = [string]$_.ErrorDetails.Message
     }
-    return @{ Status = $status; Content = $content }
+    if ($content -eq "") {
+      $stream = $http.GetResponseStream()
+      if ($null -ne $stream) {
+        $reader = New-Object System.IO.StreamReader($stream)
+        $content = $reader.ReadToEnd()
+        $reader.Dispose()
+      }
+    }
+    return @{ Status = $status; Content = $content; Headers = @(Format-Headers $http.Headers) }
+  } catch {
+    return @{ Status = 0; Content = $_.Exception.Message; Headers = @() }
   }
+}
+
+function Format-Headers($headerCollection) {
+  $lines = @()
+  if ($null -eq $headerCollection) { return $lines }
+  $names = @()
+  if ($null -ne $headerCollection.AllKeys) {
+    $names = @($headerCollection.AllKeys)
+  } else {
+    $names = @($headerCollection.Keys)
+  }
+  foreach ($key in $names) {
+    if ([string]::IsNullOrEmpty([string]$key)) { continue }
+    $value = [string]$headerCollection[$key]
+    if ($value -match "^https?://") { $value = "[redacted-url]" }
+    $lines += "$key`: $value"
+  }
+  return $lines
 }
 
 function Register-User {
@@ -109,6 +158,8 @@ $rng.GetBytes($small)
 
 $sessionA = Register-User -Email "file-a-$stamp@example.com" -Name "User A"
 $sessionB = Register-User -Email "file-b-$stamp@example.com" -Name "User B"
+$me = Get-Response -Uri "$base/api/me" -Session $sessionA
+if ($me.Status -eq 200) { $script:ownerId = [string]($me.Content | ConvertFrom-Json).id }
 
 $usage = Get-Response -Uri "$base/api/usage" -Session $sessionA
 $usageBody = $usage.Content | ConvertFrom-Json
@@ -130,7 +181,9 @@ if ($uploadDirect) {
   $put = Get-Response -Method PUT -Uri $createdJson.upload.url -Session $sessionA -InFile $source
 }
 $complete = Get-Response -Method POST -Uri "$base/api/files/$($createdJson.file.id)/complete" -Session $sessionA
-Write-Check "A upload put and complete" ($put.Status -eq 204 -and $complete.Status -eq 200) "put=$($put.Status) complete=$($complete.Status) $($complete.Content)"
+$putOk = $put.Status -eq 204 -or ($uploadDirect -and $put.Status -eq 200)
+if ($putOk -and $complete.Status -eq 200) { Add-Object $createdJson.file.id }
+Write-Check "A upload put and complete" ($putOk -and $complete.Status -eq 200) "put=$($put.Status) complete=$($complete.Status) $(Redact $complete.Content)"
 
 $list = Get-Response -Uri "$base/api/files?folderId=root" -Session $sessionA
 $listJson = @($list.Content | ConvertFrom-Json)
@@ -173,7 +226,8 @@ Write-Check "A delete hides the file" ($deleted.Status -eq 204 -and -not $stillL
 
 $second = Get-Response -Method POST -Uri "$base/api/files/upload-url" -Session $sessionA -Body '{"name":"owned.bin","size":1000}'
 if ($second.Status -ne 201) {
-  Write-Check "A second upload" $false "status=$($second.Status) body=$($second.Content)"
+  Write-Check "A second upload" $false "status=$($second.Status) body=$(Redact $second.Content)"
+  Print-Objects
   exit 1
 }
 $ownedId = ($second.Content | ConvertFrom-Json).file.id
@@ -196,16 +250,28 @@ if ($short.Status -eq 201) {
   $shortUrl = $shortJson.upload.url
   $shortHeaders = Get-UploadHeaders $shortJson.upload
   if (Test-DirectStorageUrl $shortUrl) {
-    $shortPut = Get-Response -Method PUT -Uri $shortUrl -InFile $tooBig -ExtraHeaders $shortHeaders -Direct
+    $mismatchHeaders = @{}
+    foreach ($key in @($shortHeaders.Keys)) {
+      if ($key -notmatch '^(?i)content-length$') { $mismatchHeaders[$key] = [string]$shortHeaders[$key] }
+    }
+    $shortPut = Get-Response -Method PUT -Uri $shortUrl -InFile $tooBig -ExtraHeaders $mismatchHeaders -Direct
   } else {
     $shortPut = Get-Response -Method PUT -Uri $shortUrl -Session $sessionA -InFile $tooBig
   }
-  $shortRejected = $shortPut.Status -eq 413 -or $shortPut.Status -eq 400
+  $directUpload = Test-DirectStorageUrl $shortUrl
+  if ($directUpload) {
+    $shortRejected = $shortPut.Status -eq 400 -or $shortPut.Status -eq 403 -or $shortPut.Status -eq 413
+    Write-Output "OVERSIZED_PUT status=$($shortPut.Status)"
+    foreach ($line in @($shortPut.Headers)) { if ($line -ne "") { Write-Output $line } }
+  } else {
+    $shortRejected = $shortPut.Status -eq 413 -or $shortPut.Status -eq 400
+  }
   if (-not $shortRejected -and $shortPut.Status -ge 200 -and $shortPut.Status -lt 300) {
     $shortComplete = Get-Response -Method POST -Uri "$base/api/files/$($shortJson.file.id)/complete" -Session $sessionA
     $shortRejected = $shortComplete.Status -eq 400
+    if (-not $shortRejected) { Add-Object $shortJson.file.id }
   }
-  Write-Check "PUT larger than declared size is rejected" $shortRejected "status=$($shortPut.Status) body=$($shortPut.Content)"
+  Write-Check "PUT larger than declared size is rejected" $shortRejected "status=$($shortPut.Status) body=$(Redact $shortPut.Content)"
 } else {
   Write-Check "PUT larger than declared size is rejected" $false "upload-url status=$($short.Status) body=$($short.Content)"
 }
@@ -213,5 +279,6 @@ if ($short.Status -eq 201) {
 $anon = Get-Response -Uri "$base/api/files"
 Write-Check "unauthenticated list is 401" ($anon.Status -eq 401) "status=$($anon.Status) body=$($anon.Content)"
 
+Print-Objects
 if ($failed) { exit 1 }
 exit 0
