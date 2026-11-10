@@ -1,13 +1,17 @@
 import {
+  EVENT_RETENTION_DAYS,
+  GUEST_USER_RETENTION_DAYS,
+  NOTIFICATION_RETENTION_DAYS,
   PENDING_UPLOAD_TTL_HOURS,
   SHARE_RETENTION_AFTER_END_DAYS,
   SOFT_DELETE_RETENTION_DAYS,
 } from "@transfile/shared";
-import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, eq, gte, gt, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
-import { files, session, shares, verification } from "../db/schema";
+import { files, folders, notifications, session, shareEvents, shares, user, verification } from "../db/schema";
 import type { FolderDatabase } from "../lib/folders";
+import { hourBucket, notify } from "../lib/notify";
 import { getStorage } from "../storage";
 import type { Storage } from "../storage/types";
 
@@ -27,6 +31,13 @@ export type CleanupReport = {
   deletedSessions: number;
   deletedVerifications: number;
   storageDeleteFailures: number;
+  expiringNotifications: number;
+  expiredShareNotifications: number;
+  filesExpiredNotifications: number;
+  purgedNotifications: number;
+  purgedEvents: number;
+  deletedEmptyTransfers: number;
+  deletedGuestUsers: number;
   moreWork: boolean;
 };
 
@@ -105,6 +116,13 @@ export async function runCleanup(
     deletedSessions: 0,
     deletedVerifications: 0,
     storageDeleteFailures: 0,
+    expiringNotifications: 0,
+    expiredShareNotifications: 0,
+    filesExpiredNotifications: 0,
+    purgedNotifications: 0,
+    purgedEvents: 0,
+    deletedEmptyTransfers: 0,
+    deletedGuestUsers: 0,
     moreWork: false,
   };
   const db = drizzle(env.DB);
@@ -143,6 +161,36 @@ export async function runCleanup(
     report.expiredFiles = changedRows(expired);
   } catch (error) {
     logPhaseFailure("expireFiles", error);
+  }
+
+  try {
+    const owners = await db
+      .select({ userId: files.userId })
+      .from(files)
+      .innerJoin(user, eq(files.userId, user.id))
+      .where(
+        and(
+          gte(files.deletedAt, new Date(now.getTime() - 2000)),
+          lte(files.deletedAt, new Date(now.getTime() + 2000)),
+          eq(files.status, "ready"),
+          eq(user.isAnonymous, false),
+        ),
+      )
+      .groupBy(files.userId)
+      .limit(MAX_ROWS_PER_QUERY);
+    for (const owner of owners) {
+      await notify(db, owner.userId, {
+        type: "files_expired",
+        title: "Some files expired",
+        dedupeKey: `fexp:${owner.userId}:${hourBucket(now)}`,
+      });
+      report.filesExpiredNotifications += 1;
+    }
+    if (owners.length >= MAX_ROWS_PER_QUERY) {
+      report.moreWork = true;
+    }
+  } catch (error) {
+    logPhaseFailure("filesExpiredNotice", error);
   }
 
   const retentionCutoff = new Date(now.getTime() - SOFT_DELETE_RETENTION_DAYS * DAY_MS);
@@ -225,7 +273,136 @@ export async function runCleanup(
     logPhaseFailure("purgeAuthJunk", error);
   }
 
-  report.moreWork = storageAttempts >= MAX_STORAGE_DELETES_PER_RUN;
+  const soon = new Date(now.getTime() + 6 * HOUR_MS);
+  const recent = new Date(now.getTime() - 2 * HOUR_MS);
+  try {
+    const expiring = await db
+      .select({ id: shares.id, userId: shares.userId })
+      .from(shares)
+      .innerJoin(user, eq(shares.userId, user.id))
+      .where(
+        and(
+          isNull(shares.revokedAt),
+          gt(shares.expiresAt, now),
+          lte(shares.expiresAt, soon),
+          eq(user.isAnonymous, false),
+        ),
+      )
+      .limit(MAX_ROWS_PER_QUERY);
+    for (const share of expiring) {
+      await notify(db, share.userId, {
+        type: "share_expiring",
+        title: "A link expires soon",
+        shareId: share.id,
+        dedupeKey: `exp-soon:${share.id}`,
+      });
+      report.expiringNotifications += 1;
+    }
+    const expiredShares = await db
+      .select({ id: shares.id, userId: shares.userId })
+      .from(shares)
+      .innerJoin(user, eq(shares.userId, user.id))
+      .where(
+        and(
+          isNull(shares.revokedAt),
+          lte(shares.expiresAt, now),
+          gt(shares.expiresAt, recent),
+          eq(user.isAnonymous, false),
+        ),
+      )
+      .limit(MAX_ROWS_PER_QUERY);
+    for (const share of expiredShares) {
+      await notify(db, share.userId, {
+        type: "share_expired",
+        title: "A link expired",
+        shareId: share.id,
+        dedupeKey: `expired:${share.id}`,
+      });
+      report.expiredShareNotifications += 1;
+    }
+  } catch (error) {
+    logPhaseFailure("shareExpiryNotices", error);
+  }
+
+  const notificationCutoff = new Date(now.getTime() - NOTIFICATION_RETENTION_DAYS * DAY_MS);
+  const eventCutoff = new Date(now.getTime() - EVENT_RETENTION_DAYS * DAY_MS);
+  try {
+    const oldNotifications = await db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(lte(notifications.createdAt, notificationCutoff))
+      .limit(MAX_ROWS_PER_QUERY);
+    if (oldNotifications.length > 0) {
+      await db.delete(notifications).where(
+        inArray(
+          notifications.id,
+          oldNotifications.map((row) => row.id),
+        ),
+      );
+      report.purgedNotifications = oldNotifications.length;
+    }
+    const oldEvents = await db
+      .select({ id: shareEvents.id })
+      .from(shareEvents)
+      .where(lte(shareEvents.createdAt, eventCutoff))
+      .limit(MAX_ROWS_PER_QUERY);
+    if (oldEvents.length > 0) {
+      await db.delete(shareEvents).where(
+        inArray(
+          shareEvents.id,
+          oldEvents.map((row) => row.id),
+        ),
+      );
+      report.purgedEvents = oldEvents.length;
+    }
+  } catch (error) {
+    logPhaseFailure("purgeActivity", error);
+  }
+
+  try {
+    const emptyTransfers = await db
+      .select({ id: folders.id })
+      .from(folders)
+      .leftJoin(files, eq(files.folderId, folders.id))
+      .where(
+        and(eq(folders.kind, "transfer"), lte(folders.createdAt, pendingCutoff), isNull(files.id)),
+      )
+      .limit(MAX_ROWS_PER_QUERY);
+    if (emptyTransfers.length > 0) {
+      await db.delete(folders).where(
+        inArray(
+          folders.id,
+          emptyTransfers.map((row) => row.id),
+        ),
+      );
+      report.deletedEmptyTransfers = emptyTransfers.length;
+    }
+  } catch (error) {
+    logPhaseFailure("purgeEmptyTransfers", error);
+  }
+
+  const guestCutoff = new Date(now.getTime() - GUEST_USER_RETENTION_DAYS * DAY_MS);
+  try {
+    const guests = await db
+      .select({ id: user.id })
+      .from(user)
+      .leftJoin(files, eq(files.userId, user.id))
+      .where(and(eq(user.isAnonymous, true), lte(user.createdAt, guestCutoff), isNull(files.id)))
+      .limit(20);
+    if (guests.length > 0) {
+      await db.delete(user).where(
+        inArray(
+          user.id,
+          guests.map((row) => row.id),
+        ),
+      );
+      report.deletedGuestUsers = guests.length;
+    }
+  } catch (error) {
+    logPhaseFailure("purgeGuestUsers", error);
+  }
+
+  report.moreWork = report.moreWork || storageAttempts >= MAX_STORAGE_DELETES_PER_RUN;
   console.log(JSON.stringify(report));
   return report;
 }

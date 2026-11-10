@@ -22,14 +22,14 @@ import {
 import { files, folders } from "../db/schema";
 import { notExpired } from "../lib/files";
 import type { AuthVariables } from "../middleware/auth";
-import { requireAuth } from "../middleware/auth";
+import { requireMember } from "../middleware/auth";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
 const ID_CHUNK = 50;
 
 const foldersRouter = new Hono<AppEnv>();
-foldersRouter.use("*", requireAuth);
+foldersRouter.use("*", requireMember);
 
 function database(env: Env): FolderDatabase {
   return drizzle(env.DB);
@@ -74,7 +74,7 @@ foldersRouter.get("/all", async (c) => {
       parentId: folders.parentId,
     })
     .from(folders)
-    .where(eq(folders.userId, userId))
+    .where(and(eq(folders.userId, userId), eq(folders.kind, "folder")))
     .orderBy(asc(folders.name))
     .limit(2000);
   return c.json(rows);
@@ -93,7 +93,7 @@ foldersRouter.get("/", async (c) => {
   const parentId = parsed.data.parentId;
   const current =
     parentId === null ? null : await getOwnedFolder(db, userId, parentId);
-  if (parentId !== null && current === null) {
+  if (parentId !== null && (current === null || current.kind !== "folder")) {
     return c.json({ error: "Not found" }, 404);
   }
 
@@ -110,6 +110,7 @@ foldersRouter.get("/", async (c) => {
     .where(
       and(
         eq(folders.userId, userId),
+        eq(folders.kind, "folder"),
         parentId === null ? isNull(folders.parentId) : eq(folders.parentId, parentId),
       ),
     )
@@ -164,7 +165,8 @@ foldersRouter.post("/", async (c) => {
     return c.json({ error: "Invalid request" }, 400);
   }
   const parentId = parsed.data.parentId ?? null;
-  if (parentId !== null && (await getOwnedFolder(db, userId, parentId)) === null) {
+  const parent = parentId === null ? null : await getOwnedFolder(db, userId, parentId);
+  if (parentId !== null && (parent === null || parent.kind !== "folder")) {
     return c.json({ error: "Not found" }, 404);
   }
 
@@ -204,7 +206,7 @@ foldersRouter.patch("/:id", async (c) => {
   }
 
   const folder = await getOwnedFolder(db, userId, c.req.param("id"));
-  if (!folder) {
+  if (!folder || folder.kind !== "folder") {
     return c.json({ error: "Not found" }, 404);
   }
 
@@ -221,7 +223,7 @@ foldersRouter.patch("/:id", async (c) => {
   if (parsed.data.parentId !== undefined) {
     if (
       nextParentId !== null &&
-      (await getOwnedFolder(db, userId, nextParentId)) === null
+      (await getOwnedFolder(db, userId, nextParentId))?.kind !== "folder"
     ) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -263,7 +265,7 @@ foldersRouter.delete("/:id", async (c) => {
   const userId = c.get("user").id;
   const db = database(c.env);
   const folder = await getOwnedFolder(db, userId, c.req.param("id"));
-  if (!folder) {
+  if (!folder || folder.kind !== "folder") {
     return c.json({ error: "Not found" }, 404);
   }
 

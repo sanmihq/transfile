@@ -22,6 +22,13 @@
       "when": 1794291654288,
       "tag": "0002_file_expiry",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794326783842,
+      "tag": "0003_product_v2",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,7 @@
   "name": "api",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --test-scheduled",
     "deploy": "wrangler deploy --minify",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types"

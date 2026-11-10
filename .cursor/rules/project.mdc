@@ -21,10 +21,23 @@ Rules:
 UI:
 - shadcn/ui (Radix, Maia preset) + Tailwind only. Restyle base components
   once in components/ui.
-- Rounded-3xl cards, rounded-full buttons, soft gray surfaces on white,
-  soft shadows, minimal borders. Dark primary button, blue accent, green for
-  success/progress. No glows, gradient borders or decorative animation.
-- Use theme tokens, never ad-hoc colours or radii.
-- Motion only for functional transitions.
+- No pills. Circles only for avatars and the notification count bubble.
+  Buttons, inputs, nav, tabs, chips, and cards use the radius tokens.
+- Concentric radii: a child corner is the parent radius minus the padding
+  between them, never below 6px. Use Surface, which sets its radius and
+  padding and publishes --parent-r and --parent-pad. Inner blocks use
+  rounded-inset. Do not hard-code hex or radii outside index.css.
+- Headings use the display serif (Fraunces, weight 800). Body and UI stay Geist.
+- Icons are Heroicons through AppIcon only.
+- Palette tokens only. Brand blue is the primary action. Dark ink is the
+  secondary action. Public pages may use the cloudy sky. The signed-in app
+  stays on the light surface. No glows, gradient borders, or decorative motion.
+- Motion only for functional transitions, plus the landing collage float.
 - Mobile-first: Drawer on mobile, Dialog on desktop.
 - Reference designs are in /docs/ui-references.
+
+Radii:
+- --r-control 12px, --r-card 24px, --r-sheet 28px, floor 6px.
+- Child radius = max(parent radius - parent padding, 6px).
+- Surface is the only place that sets both the element radius and the
+  inherited --parent-r / --parent-pad variables.

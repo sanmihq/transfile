@@ -9,7 +9,15 @@ type FileRow = typeof files.$inferSelect;
 
 export type ShareTarget =
   | { type: "file"; file: FileRow }
-  | { type: "folder"; folder: { id: string; name: string; parentId: string | null } };
+  | {
+      type: "folder";
+      folder: {
+        id: string;
+        name: string;
+        parentId: string | null;
+        kind: "folder" | "transfer";
+      };
+    };
 
 export type ShareState = "active" | "expired" | "revoked" | "exhausted";
 
@@ -69,7 +77,15 @@ export async function resolveTarget(
   const folder = await getOwnedFolder(db, share.userId, share.folderId);
   return folder === null
     ? null
-    : { type: "folder", folder: { id: folder.id, name: folder.name, parentId: folder.parentId } };
+    : {
+        type: "folder",
+        folder: {
+          id: folder.id,
+          name: folder.name,
+          parentId: folder.parentId,
+          kind: folder.kind,
+        },
+      };
 }
 
 export async function isInSharedSubtree(

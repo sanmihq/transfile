@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-export type GrantPurpose = "access" | "download";
+export type GrantPurpose = "access" | "download" | "preview";
 
 export type GrantPayload = {
   v: 1;
@@ -69,7 +69,7 @@ function isGrantPayload(value: unknown): value is GrantPayload {
     return false;
   }
   const record = value as Record<string, unknown>;
-  if (record.v !== 1 || (record.p !== "access" && record.p !== "download")) {
+  if (record.v !== 1 || (record.p !== "access" && record.p !== "download" && record.p !== "preview")) {
     return false;
   }
   if (typeof record.s !== "string" || record.s.length === 0) {
@@ -155,7 +155,10 @@ export async function verifyGrant(
   if (expected.fileId !== undefined && parsed.payload.f !== expected.fileId) {
     return false;
   }
-  if (expected.purpose === "download" && parsed.payload.f === undefined) {
+  if (
+    (expected.purpose === "download" || expected.purpose === "preview") &&
+    parsed.payload.f === undefined
+  ) {
     return false;
   }
   return true;

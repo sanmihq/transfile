@@ -179,10 +179,10 @@ function Test-R2Object {
 }
 
 function Send-ReadyFile {
-  param($Session, [string]$Path, [int]$ExpiresInDays = -1)
+  param($Session, [string]$Path, [int]$ExpiresInHours = -1)
   $size = (Get-Item $Path).Length
   $payload = @{ name = "notes.bin"; size = $size }
-  if ($ExpiresInDays -ge 0) { $payload.expiresInDays = $ExpiresInDays }
+  if ($ExpiresInHours -ge 0) { $payload.expiresInHours = $ExpiresInHours }
   $created = Get-Response -Method POST -Uri "$base/api/files/upload-url" -Session $Session -Body ($payload | ConvertTo-Json -Compress)
   if ($created.Status -ne 201) { return @{ Ok = $false; Detail = "upload-url $($created.Status)" } }
   $json = $created.Content | ConvertFrom-Json
@@ -221,8 +221,8 @@ $meJson = $meA.Content | ConvertFrom-Json
 $userId = [string]$meJson.id
 Assert-SafeId $userId
 
-$uploaded = Send-ReadyFile -Session $sessionA -Path $source -ExpiresInDays 1
-Write-Check "upload with expiresInDays 1" $uploaded.Ok $uploaded.Detail
+$uploaded = Send-ReadyFile -Session $sessionA -Path $source -ExpiresInHours 1
+Write-Check "upload with expiresInHours 1" $uploaded.Ok $uploaded.Detail
 $fileId = $uploaded.FileId
 Assert-SafeId $fileId
 $expires = [DateTime]::Parse([string]$uploaded.ExpiresAt).ToUniversalTime()
@@ -238,24 +238,29 @@ $listHours = 0
 if ($null -ne $listed -and $null -ne $listed.expiresAt) {
   $listHours = ([DateTime]::Parse([string]$listed.expiresAt).ToUniversalTime() - [DateTime]::UtcNow).TotalHours
 }
-$badHigh = Get-Response -Method POST -Uri "$base/api/files/upload-url" -Session $sessionA -Body (@{ name = "notes.bin"; size = 64; expiresInDays = 366 } | ConvertTo-Json -Compress)
-$badZero = Get-Response -Method POST -Uri "$base/api/files/upload-url" -Session $sessionA -Body (@{ name = "notes.bin"; size = 64; expiresInDays = 0 } | ConvertTo-Json -Compress)
-Write-Check "expiresAt is about 24h and invalid days are rejected" (
-  $list.Status -eq 200 -and $null -ne $listed -and $hours -gt 23 -and $hours -lt 25 -and
-  $null -ne $folderListed -and $listHours -gt 23 -and $listHours -lt 25 -and
+$badHigh = Get-Response -Method POST -Uri "$base/api/files/upload-url" -Session $sessionA -Body (@{ name = "notes.bin"; size = 64; expiresInHours = 73 } | ConvertTo-Json -Compress)
+$badZero = Get-Response -Method POST -Uri "$base/api/files/upload-url" -Session $sessionA -Body (@{ name = "notes.bin"; size = 64; expiresInHours = 0 } | ConvertTo-Json -Compress)
+Write-Check "expiresAt is about 1h and invalid hours are rejected" (
+  $list.Status -eq 200 -and $null -ne $listed -and $hours -gt 0.8 -and $hours -lt 1.2 -and
+  $null -ne $folderListed -and $listHours -gt 0.8 -and $listHours -lt 1.2 -and
   $badHigh.Status -eq 400 -and $badZero.Status -eq 400
 ) "list=$($list.Status) hours=$hours folderHours=$listHours high=$($badHigh.Status) zero=$($badZero.Status)"
 
-$patchLonger = Get-Response -Method PATCH -Uri "$base/api/files/$fileId" -Session $sessionA -Body (@{ expiresInDays = 2 } | ConvertTo-Json -Compress)
+$patchLonger = Get-Response -Method PATCH -Uri "$base/api/files/$fileId" -Session $sessionA -Body (@{ expiresInHours = 2 } | ConvertTo-Json -Compress)
 $longerJson = $patchLonger.Content | ConvertFrom-Json
 $longerHours = 0
 if ($patchLonger.Status -eq 200 -and $null -ne $longerJson.expiresAt) {
   $longerHours = ([DateTime]::Parse([string]$longerJson.expiresAt).ToUniversalTime() - [DateTime]::UtcNow).TotalHours
 }
-$patchClear = Get-Response -Method PATCH -Uri "$base/api/files/$fileId" -Session $sessionA -Body (@{ expiresInDays = $null } | ConvertTo-Json -Compress)
-$clearJson = $patchClear.Content | ConvertFrom-Json
-$cleared = $patchClear.Status -eq 200 -and ($null -eq $clearJson.expiresAt)
-Write-Check "patch expiry then clear it" ($longerHours -gt 47 -and $longerHours -lt 49 -and $cleared) "longer=$longerHours clear=$($patchClear.Status)"
+$patchClear = Get-Response -Method PATCH -Uri "$base/api/files/$fileId" -Session $sessionA -Body (@{ expiresInHours = $null } | ConvertTo-Json -Compress)
+$afterClear = Get-Response -Uri "$base/api/files?folderId=root" -Session $sessionA
+$stillSet = $false
+foreach ($item in (Convert-JsonList $afterClear.Content)) {
+  if ($item.id -eq $fileId -and $null -ne $item.expiresAt) { $stillSet = $true }
+}
+Write-Check "patch expiry then reject clearing it" (
+  $longerHours -gt 1.5 -and $longerHours -lt 2.5 -and $patchClear.Status -eq 400 -and $stillSet
+) "longer=$longerHours clear=$($patchClear.Status) stillSet=$stillSet"
 
 $share = Get-Response -Method POST -Uri "$base/api/shares" -Session $sessionA -Body (@{ fileId = $fileId; expiresInHours = 24 } | ConvertTo-Json -Compress)
 $shareJson = $share.Content | ConvertFrom-Json
@@ -293,8 +298,9 @@ Write-Check "cron soft-deletes the expired file and keeps the object" (
 ) "cron=$($cron.Status) deletedAtSet=$($null -ne $deletedAt) object=$($object.Code) expiredFiles=$expiredCount objectError=$($object.Message)"
 if ($script:CronUrl -ne "") { Write-Output "CRON_URL $script:CronUrl" }
 
+$fileOldSeconds = [DateTimeOffset]::UtcNow.AddDays(-2).ToUnixTimeSeconds()
 $oldSeconds = [DateTimeOffset]::UtcNow.AddDays(-8).ToUnixTimeSeconds()
-Invoke-D1 "UPDATE files SET deleted_at = $oldSeconds WHERE id = '$fileId'" | Out-Null
+Invoke-D1 "UPDATE files SET deleted_at = $fileOldSeconds WHERE id = '$fileId'" | Out-Null
 $cron = Invoke-Cron
 $fileLeft = Get-D1Count "SELECT count(*) AS n FROM files WHERE id = '$fileId'"
 $shareLeft = Get-D1Count "SELECT count(*) AS n FROM shares WHERE id = '$shareId'"

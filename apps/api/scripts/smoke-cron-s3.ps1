@@ -262,8 +262,8 @@ Write-Check "expired file is soft-deleted and the object remains" (
   $cron.Ok -and $null -ne $deletedAt -and "$deletedAt" -ne "" -and $head.Status -eq "200"
 ) "cron=$($cron.Status) deletedAtSet=$($null -ne $deletedAt) head=$($head.Status) $($head.Error)"
 
-$oldSeconds = [DateTimeOffset]::UtcNow.AddDays(-8).ToUnixTimeSeconds()
-Invoke-D1 "UPDATE files SET deleted_at = $oldSeconds WHERE id = '$fileId'" | Out-Null
+$fileOldSeconds = [DateTimeOffset]::UtcNow.AddDays(-2).ToUnixTimeSeconds()
+Invoke-D1 "UPDATE files SET deleted_at = $fileOldSeconds WHERE id = '$fileId'" | Out-Null
 $cron = Invoke-Cron
 $left = Get-D1Count "SELECT count(*) AS n FROM files WHERE id = '$fileId'"
 $head = Get-S3Status "$userId/$fileId"

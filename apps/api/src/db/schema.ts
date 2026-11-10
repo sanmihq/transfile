@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { user } from "./auth-schema";
 
 export * from "./auth-schema";
@@ -14,6 +14,9 @@ export const folders = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     parentId: text("parent_id"),
     name: text("name").notNull(),
+    kind: text("kind", { enum: ["folder", "transfer"] })
+      .notNull()
+      .default("folder"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .$defaultFn(now),
@@ -73,6 +76,8 @@ export const shares = sqliteTable(
     failedAttempts: integer("failed_attempts").notNull().default(0),
     lockedUntil: integer("locked_until", { mode: "timestamp" }),
     revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    allowComments: integer("allow_comments", { mode: "boolean" }).notNull().default(true),
+    message: text("message"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .$defaultFn(now),
@@ -81,4 +86,81 @@ export const shares = sqliteTable(
     index("shares_user_id_idx").on(table.userId),
     index("shares_expires_at_idx").on(table.expiresAt),
   ],
+);
+
+export const shareComments = sqliteTable(
+  "share_comments",
+  {
+    id: text("id").primaryKey(),
+    shareId: text("share_id")
+      .notNull()
+      .references(() => shares.id, { onDelete: "cascade" }),
+    fileId: text("file_id"),
+    authorName: text("author_name"),
+    body: text("body").notNull(),
+    visitorHash: text("visitor_hash").notNull(),
+    readAt: integer("read_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(now),
+  },
+  (table) => [
+    index("share_comments_share_id_idx").on(table.shareId),
+    index("share_comments_visitor_idx").on(table.shareId, table.visitorHash, table.createdAt),
+  ],
+);
+
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    type: text("type", {
+      enum: [
+        "share_opened",
+        "file_downloaded",
+        "share_locked",
+        "comment_received",
+        "share_expiring",
+        "share_expired",
+        "files_expired",
+      ],
+    }).notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    shareId: text("share_id"),
+    fileId: text("file_id"),
+    commentId: text("comment_id"),
+    dedupeKey: text("dedupe_key"),
+    readAt: integer("read_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(now),
+  },
+  (table) => [
+    uniqueIndex("notifications_user_dedupe_idx").on(table.userId, table.dedupeKey),
+    index("notifications_user_read_idx").on(table.userId, table.readAt, table.createdAt),
+  ],
+);
+
+export const shareEvents = sqliteTable(
+  "share_events",
+  {
+    id: text("id").primaryKey(),
+    shareId: text("share_id")
+      .notNull()
+      .references(() => shares.id, { onDelete: "cascade" }),
+    type: text("type", {
+      enum: ["opened", "unlocked", "unlock_failed", "downloaded", "commented"],
+    }).notNull(),
+    fileId: text("file_id"),
+    country: text("country"),
+    visitorHash: text("visitor_hash"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(now),
+  },
+  (table) => [index("share_events_share_created_idx").on(table.shareId, table.createdAt)],
 );

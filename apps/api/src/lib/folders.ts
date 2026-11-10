@@ -69,7 +69,7 @@ export async function getSubtreeIds(
       SELECT child.id
       FROM folders AS child
       INNER JOIN subtree ON child.parent_id = subtree.id
-      WHERE child.user_id = ${userId}
+      WHERE child.user_id = ${userId} AND child.kind = 'folder'
       LIMIT ${SUBTREE_ROW_CAP}
     )
     SELECT id FROM subtree
@@ -91,7 +91,7 @@ export async function getSubtreeHeight(
       SELECT child.id, subtree.height + 1
       FROM folders AS child
       INNER JOIN subtree ON child.parent_id = subtree.id
-      WHERE child.user_id = ${userId} AND subtree.height < ${SUBTREE_ROW_CAP}
+      WHERE child.user_id = ${userId} AND child.kind = 'folder' AND subtree.height < ${SUBTREE_ROW_CAP}
     )
     SELECT max(height) AS height FROM subtree
   `);

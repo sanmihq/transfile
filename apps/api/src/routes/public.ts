@@ -1,6 +1,10 @@
 import {
+  COMMENTS_PER_SHARE_MAX,
+  COMMENTS_PER_VISITOR_PER_HOUR,
   MAX_UNLOCK_ATTEMPTS,
   UNLOCK_LOCKOUT_MINUTES,
+  createCommentSchema,
+  previewQuerySchema,
   publicContentsQuerySchema,
   publicDownloadQuerySchema,
   shareTokenSchema,
@@ -10,7 +14,8 @@ import { and, asc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { verifyPassword } from "../auth/password";
-import { files, folders, shares } from "../db/schema";
+import { files, folders, shareComments, shares } from "../db/schema";
+import { recordEvent } from "../lib/events";
 import { notExpired } from "../lib/files";
 import type { FolderDatabase } from "../lib/folders";
 import { getAncestors, getOwnedFolder } from "../lib/folders";
@@ -18,9 +23,18 @@ import {
   ACCESS_GRANT_SECONDS,
   DOWNLOAD_GRANT_SECONDS,
   grantFileId,
+  requireShareSecret,
   signGrant,
   verifyGrant,
 } from "../lib/grants";
+import { hourBucket, minuteBucket, notify } from "../lib/notify";
+import {
+  clientIp,
+  isPreviewable,
+  ownerIsGuest,
+  requestCountry,
+  visitorHash,
+} from "../lib/privacy";
 import {
   getShareState,
   isInSharedSubtree,
@@ -29,7 +43,7 @@ import {
   resolveTarget,
 } from "../lib/shares";
 import type { ShareTarget } from "../lib/shares";
-import { attachmentContentDisposition } from "../storage/content-disposition";
+import { attachmentContentDisposition, inlineContentDisposition } from "../storage/content-disposition";
 import { requireFilesBinding } from "../storage/env";
 import { getStorage, isS3Mode } from "../storage";
 
@@ -51,7 +65,7 @@ function originOf(requestUrl: string): string {
 function noStore(
   c: { json: (body: unknown, status?: number, headers?: Record<string, string>) => Response },
   body: unknown,
-  status: 200 | 400 | 401 | 404 | 410 | 429,
+  status: 200 | 201 | 400 | 401 | 403 | 404 | 410 | 429,
   extraHeaders?: Record<string, string>,
 ): Response {
   return c.json(body, status, { "Cache-Control": "no-store", ...extraHeaders });
@@ -106,7 +120,7 @@ async function openShare(
   return { ok: true, db, share, target };
 }
 
-function metadata(share: ShareRow, target: ShareTarget) {
+async function publicMetadata(db: FolderDatabase, share: ShareRow, target: ShareTarget) {
   const remainingDownloads =
     share.maxDownloads === null ? null : Math.max(0, share.maxDownloads - share.downloadCount);
   if (target.type === "file") {
@@ -118,15 +132,64 @@ function metadata(share: ShareRow, target: ShareTarget) {
       mime: target.file.mime,
       expiresAt: share.expiresAt,
       remainingDownloads,
+      allowComments: share.allowComments,
+      message: share.message,
+      previewable: isPreviewable(target.file.mime, target.file.size),
     };
   }
+  const [row] = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(files)
+    .where(
+      and(
+        eq(files.userId, share.userId),
+        eq(files.folderId, target.folder.id),
+        eq(files.status, "ready"),
+        isNull(files.deletedAt),
+        notExpired(),
+      ),
+    );
+  const kind = target.folder.kind === "transfer" ? "transfer" : "folder";
   return {
     requiresPassword: false,
-    type: "folder" as const,
+    type: kind,
     name: target.folder.name,
+    title: target.folder.name,
     expiresAt: share.expiresAt,
     remainingDownloads,
+    allowComments: share.allowComments,
+    message: share.message,
+    fileCount: Number(row?.total ?? 0),
   };
+}
+
+async function noteShareView(
+  c: { env: Env; req: { raw: Request; header: (name: string) => string | undefined } },
+  db: FolderDatabase,
+  share: ShareRow,
+): Promise<void> {
+  const now = new Date();
+  const hash = await visitorHash(
+    requireShareSecret(c.env),
+    clientIp(c.req.header("cf-connecting-ip")),
+    c.req.header("user-agent") ?? "",
+    share.id,
+  );
+  const country = requestCountry(c.req.raw);
+  await recordEvent(db, {
+    ownerId: share.userId,
+    shareId: share.id,
+    type: "opened",
+    country,
+    visitorHash: hash,
+    now,
+  });
+  await notify(db, share.userId, {
+    type: "share_opened",
+    title: "Someone opened your link",
+    shareId: share.id,
+    dedupeKey: `open:${share.id}:${hourBucket(now)}`,
+  });
 }
 
 async function loadReadyFile(
@@ -189,7 +252,8 @@ publicRouter.get("/:token", async (c) => {
       return noStore(c, { requiresPassword: true, expiresAt: opened.share.expiresAt }, 200);
     }
   }
-  return noStore(c, metadata(opened.share, opened.target), 200);
+  await noteShareView(c, opened.db, opened.share);
+  return noStore(c, await publicMetadata(opened.db, opened.share, opened.target), 200);
 });
 
 publicRouter.post("/:token/unlock", async (c) => {
@@ -236,6 +300,25 @@ publicRouter.post("/:token/unlock", async (c) => {
         lockedUntil: sql`CASE WHEN ${shares.failedAttempts} + 1 >= ${MAX_UNLOCK_ATTEMPTS} THEN ${lockedUntilSeconds} ELSE ${shares.lockedUntil} END`,
       })
       .where(eq(shares.id, opened.share.id));
+    const [locked] = await opened.db
+      .select({ lockedUntil: shares.lockedUntil })
+      .from(shares)
+      .where(eq(shares.id, opened.share.id))
+      .limit(1);
+    await recordEvent(opened.db, {
+      ownerId: opened.share.userId,
+      shareId: opened.share.id,
+      type: "unlock_failed",
+      country: requestCountry(c.req.raw),
+    });
+    if (locked?.lockedUntil && locked.lockedUntil.getTime() > now.getTime()) {
+      await notify(opened.db, opened.share.userId, {
+        type: "share_locked",
+        title: "A link was locked",
+        shareId: opened.share.id,
+        dedupeKey: `lock:${opened.share.id}:${Math.floor(locked.lockedUntil.getTime() / 1000)}`,
+      });
+    }
     return noStore(c, { error: "Incorrect password" }, 401);
   }
 
@@ -243,6 +326,12 @@ publicRouter.post("/:token/unlock", async (c) => {
     .update(shares)
     .set({ failedAttempts: 0, lockedUntil: null })
     .where(eq(shares.id, opened.share.id));
+  await recordEvent(opened.db, {
+    ownerId: opened.share.userId,
+    shareId: opened.share.id,
+    type: "unlocked",
+    country: requestCountry(c.req.raw),
+  });
   const exp = Math.floor(now.getTime() / 1000) + ACCESS_GRANT_SECONDS;
   const accessToken = await signGrant(c.env, {
     v: 1,
@@ -282,7 +371,7 @@ publicRouter.get("/:token/contents", async (c) => {
   const childFolders = await opened.db
     .select({ id: folders.id, name: folders.name })
     .from(folders)
-    .where(and(eq(folders.userId, opened.share.userId), eq(folders.parentId, folder.id)))
+    .where(and(eq(folders.userId, opened.share.userId), eq(folders.parentId, folder.id), eq(folders.kind, "folder")))
     .orderBy(asc(folders.name));
   const childFiles = await opened.db
     .select({
@@ -308,7 +397,10 @@ publicRouter.get("/:token/contents", async (c) => {
       folder: { id: folder.id, name: folder.name },
       breadcrumbs,
       folders: childFolders,
-      files: childFiles,
+      files: childFiles.map((file) => ({
+        ...file,
+        previewable: isPreviewable(file.mime, file.size),
+      })),
     },
     200,
   );
@@ -350,6 +442,23 @@ publicRouter.get("/:token/download-url", async (c) => {
   if (counted.length === 0) {
     return noStore(c, { error: UNAVAILABLE }, 410);
   }
+  const now = new Date();
+  await recordEvent(opened.db, {
+    ownerId: opened.share.userId,
+    shareId: opened.share.id,
+    type: "downloaded",
+    fileId: file.id,
+    country: requestCountry(c.req.raw),
+    now,
+  });
+  await notify(opened.db, opened.share.userId, {
+    type: "file_downloaded",
+    title: "A file was downloaded",
+    body: file.name,
+    shareId: opened.share.id,
+    fileId: file.id,
+    dedupeKey: `dl:${opened.share.id}:${minuteBucket(now)}`,
+  });
 
   if (isS3Mode(c.env)) {
     const download = await getStorage(c.env).createDownload({
@@ -415,6 +524,178 @@ publicRouter.get("/:token/file/:grant", async (c) => {
       "Content-Disposition": attachmentContentDisposition(file.name),
     },
   });
+});
+
+publicRouter.get("/:token/preview-url", async (c) => {
+  const opened = await openShare(c, c.req.param("token"), true);
+  if (!opened.ok) {
+    return opened.response;
+  }
+  const parsed = previewQuerySchema.safeParse({ fileId: c.req.query("fileId") });
+  if (!parsed.success) {
+    return noStore(c, { error: "Invalid request" }, 400);
+  }
+  const requestedId =
+    opened.share.fileId !== null ? opened.share.fileId : (parsed.data.fileId ?? null);
+  if (requestedId === null) {
+    return noStore(c, { error: "Not found" }, 404);
+  }
+  const file = await fileInsideShare(opened.db, opened.share, requestedId);
+  if (!file || !isPreviewable(file.mime, file.size)) {
+    return noStore(c, { error: "Not found" }, 404);
+  }
+  if (isS3Mode(c.env)) {
+    const preview = await getStorage(c.env).createPreview({
+      key: file.r2Key,
+      fileId: file.id,
+      fileName: file.name,
+      mime: file.mime ?? "application/octet-stream",
+      origin: originOf(c.req.url),
+    });
+    return noStore(c, { url: preview.url }, 200);
+  }
+  const grant = await signGrant(c.env, {
+    v: 1,
+    p: "preview",
+    s: opened.share.id,
+    f: file.id,
+    pv: await passwordVersion(opened.share),
+    exp: Math.floor(Date.now() / 1000) + DOWNLOAD_GRANT_SECONDS,
+  });
+  return noStore(
+    c,
+    { url: `${originOf(c.req.url)}/api/s/${opened.share.token}/preview/${grant}` },
+    200,
+  );
+});
+
+publicRouter.get("/:token/preview/:grant", async (c) => {
+  if (isS3Mode(c.env)) {
+    return noStore(c, { error: "Not found" }, 404);
+  }
+  const opened = await openShare(c, c.req.param("token"), false);
+  if (!opened.ok) {
+    return opened.response;
+  }
+  const grant = c.req.param("grant");
+  const fileId = grantFileId(grant);
+  if (fileId === null) {
+    return noStore(c, { error: "Not found" }, 404);
+  }
+  const valid = await verifyGrant(c.env, grant, {
+    purpose: "preview",
+    shareId: opened.share.id,
+    passwordVersion: await passwordVersion(opened.share),
+    fileId,
+  });
+  if (!valid) {
+    return noStore(c, { error: "Not found" }, 404);
+  }
+  const file = await fileInsideShare(opened.db, opened.share, fileId);
+  if (!file || !isPreviewable(file.mime, file.size)) {
+    return noStore(c, { error: "Not found" }, 404);
+  }
+  const object = await requireFilesBinding(c.env).get(file.r2Key);
+  if (!object) {
+    return noStore(c, { error: "Not found" }, 404);
+  }
+  return new Response(object.body, {
+    headers: {
+      "Content-Type": file.mime ?? "application/octet-stream",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Length": String(object.size),
+      "Cache-Control": "no-store",
+      "Content-Disposition": inlineContentDisposition(file.name),
+    },
+  });
+});
+
+publicRouter.post("/:token/comments", async (c) => {
+  const opened = await openShare(c, c.req.param("token"), true);
+  if (!opened.ok) {
+    return opened.response;
+  }
+  if (!opened.share.allowComments) {
+    return noStore(c, { error: "Comments are turned off" }, 403);
+  }
+  if (await ownerIsGuest(opened.db, opened.share.userId)) {
+    return noStore(c, { error: "Comments are turned off" }, 403);
+  }
+  const payload = await readJson(c.req.raw);
+  if (payload === undefined) {
+    return noStore(c, { error: "Invalid request" }, 400);
+  }
+  const parsed = createCommentSchema.safeParse(payload);
+  if (!parsed.success) {
+    return noStore(c, { error: "Invalid request" }, 400);
+  }
+  if ((parsed.data.website ?? "").trim().length > 0) {
+    return noStore(c, { ok: true }, 201);
+  }
+  const hash = await visitorHash(
+    requireShareSecret(c.env),
+    clientIp(c.req.header("cf-connecting-ip")),
+    c.req.header("user-agent") ?? "",
+    opened.share.id,
+  );
+  const now = new Date();
+  const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+  const [visitorRow] = await opened.db
+    .select({ total: sql<number>`count(*)` })
+    .from(shareComments)
+    .where(
+      and(
+        eq(shareComments.shareId, opened.share.id),
+        eq(shareComments.visitorHash, hash),
+        gt(shareComments.createdAt, hourAgo),
+      ),
+    );
+  const [shareRow] = await opened.db
+    .select({ total: sql<number>`count(*)` })
+    .from(shareComments)
+    .where(eq(shareComments.shareId, opened.share.id));
+  if (
+    Number(visitorRow?.total ?? 0) >= COMMENTS_PER_VISITOR_PER_HOUR ||
+    Number(shareRow?.total ?? 0) >= COMMENTS_PER_SHARE_MAX
+  ) {
+    return noStore(c, { error: "Too many comments" }, 429);
+  }
+  let fileId: string | null = null;
+  if (parsed.data.fileId !== undefined) {
+    const file = await fileInsideShare(opened.db, opened.share, parsed.data.fileId);
+    if (!file) {
+      return noStore(c, { error: "Not found" }, 404);
+    }
+    fileId = file.id;
+  }
+  const commentId = crypto.randomUUID();
+  await opened.db.insert(shareComments).values({
+    id: commentId,
+    shareId: opened.share.id,
+    fileId,
+    authorName: parsed.data.name ?? null,
+    body: parsed.data.message,
+    visitorHash: hash,
+    createdAt: now,
+  });
+  await notify(opened.db, opened.share.userId, {
+    type: "comment_received",
+    title: "Someone left a note",
+    shareId: opened.share.id,
+    fileId,
+    commentId,
+    dedupeKey: `comment:${commentId}`,
+  });
+  await recordEvent(opened.db, {
+    ownerId: opened.share.userId,
+    shareId: opened.share.id,
+    type: "commented",
+    fileId,
+    country: requestCountry(c.req.raw),
+    now,
+  });
+  return noStore(c, { ok: true }, 201);
 });
 
 export { publicRouter };

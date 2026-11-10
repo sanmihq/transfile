@@ -11,3 +11,7 @@ STORAGE_MODE=worker
 # S3_BUCKET=
 # Share-link signing secret. At least 32 characters. Never commit a real value.
 SHARE_SECRET=
+# Cloudflare Turnstile secret. Empty locally skips verification on http sites.
+TURNSTILE_SECRET=
+# Optional guest-pool override in bytes. Leave unset to use the 2 GB default.
+# GUEST_POOL_BYTES=

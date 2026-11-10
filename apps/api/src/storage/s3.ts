@@ -1,5 +1,5 @@
 import { AwsClient } from "aws4fetch";
-import { attachmentContentDisposition } from "./content-disposition";
+import { attachmentContentDisposition, inlineContentDisposition } from "./content-disposition";
 import type { StorageEnv } from "./env";
 import type { Storage, UploadTarget } from "./types";
 
@@ -101,6 +101,23 @@ export class S3Storage implements Storage {
       attachmentContentDisposition(args.fileName),
     );
     url.searchParams.set("response-content-type", "application/octet-stream");
+    const signed = await this.client.sign(new Request(url, { method: "GET" }), {
+      aws: { signQuery: true },
+    });
+    return { url: signed.url };
+  }
+
+  async createPreview(args: {
+    key: string;
+    fileId: string;
+    fileName: string;
+    mime: string;
+    origin: string;
+  }): Promise<{ url: string }> {
+    const url = this.objectUrl(args.key);
+    url.searchParams.set("X-Amz-Expires", String(GET_EXPIRES_SECONDS));
+    url.searchParams.set("response-content-disposition", inlineContentDisposition(args.fileName));
+    url.searchParams.set("response-content-type", args.mime);
     const signed = await this.client.sign(new Request(url, { method: "GET" }), {
       aws: { signQuery: true },
     });

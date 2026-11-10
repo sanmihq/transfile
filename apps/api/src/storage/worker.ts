@@ -33,6 +33,18 @@ export class WorkerStorage implements Storage {
     });
   }
 
+  createPreview(args: {
+    key: string;
+    fileId: string;
+    fileName: string;
+    mime: string;
+    origin: string;
+  }): Promise<{ url: string }> {
+    return Promise.resolve({
+      url: `${args.origin}/api/files/${args.fileId}/preview`,
+    });
+  }
+
   async head(key: string): Promise<{ size: number } | null> {
     const object = await this.files.head(key);
     if (!object) {

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXPIRY_HOURS,
   MAX_FILE_BYTES,
   USER_QUOTA_BYTES,
   listFilesQuerySchema,
@@ -10,18 +11,19 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { files } from "../db/schema";
+import { addHours, cappedExpiry } from "../lib/expiry";
 import { notExpired } from "../lib/files";
 import { getOwnedFolder } from "../lib/folders";
+import { guestPoolLimit, guestPoolUsed, isPreviewable, userIsGuest } from "../lib/privacy";
 import type { AuthVariables } from "../middleware/auth";
-import { requireAuth } from "../middleware/auth";
-import { attachmentContentDisposition } from "../storage/content-disposition";
+import { requireAuth, requireMember } from "../middleware/auth";
+import { attachmentContentDisposition, inlineContentDisposition } from "../storage/content-disposition";
 import { requireFilesBinding } from "../storage/env";
 import { getStorage, isS3Mode } from "../storage";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
 const filesRouter = new Hono<AppEnv>();
-filesRouter.use("*", requireAuth);
 
 function database(env: Env) {
   return drizzle(env.DB);
@@ -31,10 +33,8 @@ function originOf(requestUrl: string): string {
   return new URL(requestUrl).origin;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function expiresAtFromDays(days: number, now: Date): Date {
-  return new Date(now.getTime() + days * DAY_MS);
+function fileExpiry(hours: number | undefined, createdAt: Date, now: Date): Date {
+  return cappedExpiry(createdAt, addHours(now, hours ?? DEFAULT_EXPIRY_HOURS));
 }
 
 async function readJson(request: Request): Promise<unknown | undefined> {
@@ -64,7 +64,7 @@ async function usedBytes(env: Env, userId: string): Promise<number> {
   return Number(row?.used ?? 0);
 }
 
-filesRouter.post("/upload-url", async (c) => {
+filesRouter.post("/upload-url", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const payload = await readJson(c.req.raw);
   if (payload === undefined) {
@@ -85,6 +85,15 @@ filesRouter.post("/upload-url", async (c) => {
   if (used + parsed.data.size > USER_QUOTA_BYTES) {
     return c.json({ error: "Storage quota exceeded" }, 413);
   }
+  if (userIsGuest(c.get("user"))) {
+    const poolUsed = await guestPoolUsed(database(c.env), new Date());
+    if (poolUsed + parsed.data.size > guestPoolLimit(c.env)) {
+      return c.json(
+        { error: "Guest uploads are busy right now. Try again later or sign up." },
+        503,
+      );
+    }
+  }
 
   const fileId = crypto.randomUUID();
   const r2Key = `${userId}/${fileId}`;
@@ -93,10 +102,7 @@ filesRouter.post("/upload-url", async (c) => {
       ? parsed.data.mime
       : "application/octet-stream";
   const now = new Date();
-  const expiresAt =
-    parsed.data.expiresInDays === undefined
-      ? null
-      : expiresAtFromDays(parsed.data.expiresInDays, now);
+  const expiresAt = fileExpiry(parsed.data.expiresInHours, now, now);
 
   await database(c.env)
     .insert(files)
@@ -136,7 +142,7 @@ filesRouter.post("/upload-url", async (c) => {
   );
 });
 
-filesRouter.put("/:id/content", async (c) => {
+filesRouter.put("/:id/content", requireAuth, async (c) => {
   if (isS3Mode(c.env)) {
     return c.json({ error: "Not found" }, 404);
   }
@@ -182,7 +188,7 @@ filesRouter.put("/:id/content", async (c) => {
   return c.body(null, 204);
 });
 
-filesRouter.post("/:id/complete", async (c) => {
+filesRouter.post("/:id/complete", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const fileId = c.req.param("id");
   const [file] = await database(c.env)
@@ -232,7 +238,7 @@ filesRouter.post("/:id/complete", async (c) => {
   });
 });
 
-filesRouter.get("/:id/download-url", async (c) => {
+filesRouter.get("/:id/download-url", requireMember, async (c) => {
   const userId = c.get("user").id;
   const fileId = c.req.param("id");
   const [file] = await database(c.env)
@@ -260,7 +266,74 @@ filesRouter.get("/:id/download-url", async (c) => {
   return c.json(download);
 });
 
-filesRouter.get("/:id/content", async (c) => {
+filesRouter.get("/:id/preview-url", requireMember, async (c) => {
+  const userId = c.get("user").id;
+  const fileId = c.req.param("id");
+  const [file] = await database(c.env)
+    .select()
+    .from(files)
+    .where(
+      and(
+        eq(files.id, fileId),
+        eq(files.userId, userId),
+        eq(files.status, "ready"),
+        isNull(files.deletedAt),
+        notExpired(),
+      ),
+    )
+    .limit(1);
+  if (!file || !isPreviewable(file.mime, file.size)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const preview = await getStorage(c.env).createPreview({
+    key: file.r2Key,
+    fileId: file.id,
+    fileName: file.name,
+    mime: file.mime ?? "application/octet-stream",
+    origin: originOf(c.req.url),
+  });
+  return c.json(preview);
+});
+
+filesRouter.get("/:id/preview", requireMember, async (c) => {
+  if (isS3Mode(c.env)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const userId = c.get("user").id;
+  const fileId = c.req.param("id");
+  const [file] = await database(c.env)
+    .select()
+    .from(files)
+    .where(
+      and(
+        eq(files.id, fileId),
+        eq(files.userId, userId),
+        eq(files.status, "ready"),
+        isNull(files.deletedAt),
+        notExpired(),
+      ),
+    )
+    .limit(1);
+  if (!file || !isPreviewable(file.mime, file.size)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const object = await requireFilesBinding(c.env).get(file.r2Key);
+  if (!object) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  return new Response(object.body, {
+    headers: {
+      "Content-Type": file.mime ?? "application/octet-stream",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Length": String(object.size),
+      "Cache-Control": "no-store",
+      "Content-Disposition": inlineContentDisposition(file.name),
+    },
+  });
+});
+
+filesRouter.get("/:id/content", requireMember, async (c) => {
   if (isS3Mode(c.env)) {
     return c.json({ error: "Not found" }, 404);
   }
@@ -297,7 +370,7 @@ filesRouter.get("/:id/content", async (c) => {
   });
 });
 
-filesRouter.get("/", async (c) => {
+filesRouter.get("/", requireMember, async (c) => {
   const userId = c.get("user").id;
   const parsed = listFilesQuerySchema.safeParse({
     folderId: c.req.query("folderId"),
@@ -334,7 +407,7 @@ filesRouter.get("/", async (c) => {
   return c.json(rows);
 });
 
-filesRouter.patch("/:id", async (c) => {
+filesRouter.patch("/:id", requireMember, async (c) => {
   const userId = c.get("user").id;
   const fileId = c.req.param("id");
   const payload = await readJson(c.req.raw);
@@ -376,11 +449,9 @@ filesRouter.patch("/:id", async (c) => {
     parsed.data.name === undefined ? file.name : sanitizeFileName(parsed.data.name);
   const now = new Date();
   const expiresAt =
-    parsed.data.expiresInDays === undefined
+    parsed.data.expiresInHours === undefined
       ? file.expiresAt
-      : parsed.data.expiresInDays === null
-        ? null
-        : expiresAtFromDays(parsed.data.expiresInDays, now);
+      : cappedExpiry(file.createdAt, addHours(now, parsed.data.expiresInHours));
   await database(c.env)
     .update(files)
     .set({ name: nextName, folderId: nextFolderId, expiresAt })
@@ -398,7 +469,7 @@ filesRouter.patch("/:id", async (c) => {
   });
 });
 
-filesRouter.delete("/:id", async (c) => {
+filesRouter.delete("/:id", requireMember, async (c) => {
   const userId = c.get("user").id;
   const fileId = c.req.param("id");
   const [file] = await database(c.env)
