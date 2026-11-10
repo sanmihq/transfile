@@ -10,6 +10,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { files } from "../db/schema";
+import { notExpired } from "../lib/files";
 import { getOwnedFolder } from "../lib/folders";
 import type { AuthVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
@@ -28,6 +29,12 @@ function database(env: Env) {
 
 function originOf(requestUrl: string): string {
   return new URL(requestUrl).origin;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function expiresAtFromDays(days: number, now: Date): Date {
+  return new Date(now.getTime() + days * DAY_MS);
 }
 
 async function readJson(request: Request): Promise<unknown | undefined> {
@@ -53,7 +60,7 @@ async function usedBytes(env: Env, userId: string): Promise<number> {
       used: sql<number>`coalesce(sum(${files.size}), 0)`,
     })
     .from(files)
-    .where(and(eq(files.userId, userId), isNull(files.deletedAt)));
+    .where(and(eq(files.userId, userId), isNull(files.deletedAt), notExpired()));
   return Number(row?.used ?? 0);
 }
 
@@ -85,6 +92,11 @@ filesRouter.post("/upload-url", async (c) => {
     parsed.data.mime && parsed.data.mime.length > 0
       ? parsed.data.mime
       : "application/octet-stream";
+  const now = new Date();
+  const expiresAt =
+    parsed.data.expiresInDays === undefined
+      ? null
+      : expiresAtFromDays(parsed.data.expiresInDays, now);
 
   await database(c.env)
     .insert(files)
@@ -97,6 +109,8 @@ filesRouter.post("/upload-url", async (c) => {
       size: parsed.data.size,
       mime,
       status: "pending",
+      createdAt: now,
+      expiresAt,
     });
 
   const upload = await getStorage(c.env).createUpload({
@@ -114,6 +128,7 @@ filesRouter.post("/upload-url", async (c) => {
         name,
         size: parsed.data.size,
         status: "pending" as const,
+        expiresAt,
       },
       upload,
     },
@@ -136,6 +151,7 @@ filesRouter.put("/:id/content", async (c) => {
         eq(files.userId, userId),
         eq(files.status, "pending"),
         isNull(files.deletedAt),
+        notExpired(),
       ),
     )
     .limit(1);
@@ -178,6 +194,7 @@ filesRouter.post("/:id/complete", async (c) => {
         eq(files.userId, userId),
         eq(files.status, "pending"),
         isNull(files.deletedAt),
+        notExpired(),
       ),
     )
     .limit(1);
@@ -211,6 +228,7 @@ filesRouter.post("/:id/complete", async (c) => {
     folderId: file.folderId,
     status: "ready" as const,
     createdAt: file.createdAt,
+    expiresAt: file.expiresAt,
   });
 });
 
@@ -226,6 +244,7 @@ filesRouter.get("/:id/download-url", async (c) => {
         eq(files.userId, userId),
         eq(files.status, "ready"),
         isNull(files.deletedAt),
+        notExpired(),
       ),
     )
     .limit(1);
@@ -256,6 +275,7 @@ filesRouter.get("/:id/content", async (c) => {
         eq(files.userId, userId),
         eq(files.status, "ready"),
         isNull(files.deletedAt),
+        notExpired(),
       ),
     )
     .limit(1);
@@ -298,6 +318,7 @@ filesRouter.get("/", async (c) => {
       mime: files.mime,
       folderId: files.folderId,
       createdAt: files.createdAt,
+      expiresAt: files.expiresAt,
     })
     .from(files)
     .where(
@@ -305,6 +326,7 @@ filesRouter.get("/", async (c) => {
         eq(files.userId, userId),
         eq(files.status, "ready"),
         isNull(files.deletedAt),
+        notExpired(),
         folderId === null ? isNull(files.folderId) : eq(files.folderId, folderId),
       ),
     )
@@ -333,6 +355,7 @@ filesRouter.patch("/:id", async (c) => {
         eq(files.userId, userId),
         eq(files.status, "ready"),
         isNull(files.deletedAt),
+        notExpired(),
       ),
     )
     .limit(1);
@@ -351,9 +374,16 @@ filesRouter.patch("/:id", async (c) => {
 
   const nextName =
     parsed.data.name === undefined ? file.name : sanitizeFileName(parsed.data.name);
+  const now = new Date();
+  const expiresAt =
+    parsed.data.expiresInDays === undefined
+      ? file.expiresAt
+      : parsed.data.expiresInDays === null
+        ? null
+        : expiresAtFromDays(parsed.data.expiresInDays, now);
   await database(c.env)
     .update(files)
-    .set({ name: nextName, folderId: nextFolderId })
+    .set({ name: nextName, folderId: nextFolderId, expiresAt })
     .where(and(eq(files.id, file.id), eq(files.userId, userId)));
 
   return c.json({
@@ -364,6 +394,7 @@ filesRouter.patch("/:id", async (c) => {
     folderId: nextFolderId,
     status: file.status,
     createdAt: file.createdAt,
+    expiresAt,
   });
 });
 
@@ -378,6 +409,7 @@ filesRouter.delete("/:id", async (c) => {
         eq(files.id, fileId),
         eq(files.userId, userId),
         isNull(files.deletedAt),
+        notExpired(),
       ),
     )
     .limit(1);
@@ -400,7 +432,7 @@ usageRouter.get("/", requireAuth, async (c) => {
       fileCount: sql<number>`count(*)`,
     })
     .from(files)
-    .where(and(eq(files.userId, userId), isNull(files.deletedAt)));
+    .where(and(eq(files.userId, userId), isNull(files.deletedAt), notExpired()));
   return c.json({
     used: Number(row?.used ?? 0),
     quota: USER_QUOTA_BYTES,

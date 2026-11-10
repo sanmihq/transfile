@@ -15,6 +15,13 @@
       "when": 1794289494652,
       "tag": "0001_share_lockout",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794291654288,
+      "tag": "0002_file_expiry",
+      "breakpoints": true
     }
   ]
 }

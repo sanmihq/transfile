@@ -20,6 +20,7 @@ import {
   type FolderDatabase,
 } from "../lib/folders";
 import { files, folders } from "../db/schema";
+import { notExpired } from "../lib/files";
 import type { AuthVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 
@@ -121,6 +122,7 @@ foldersRouter.get("/", async (c) => {
       mime: files.mime,
       folderId: files.folderId,
       createdAt: files.createdAt,
+      expiresAt: files.expiresAt,
     })
     .from(files)
     .where(
@@ -128,6 +130,7 @@ foldersRouter.get("/", async (c) => {
         eq(files.userId, userId),
         eq(files.status, "ready"),
         isNull(files.deletedAt),
+        notExpired(),
         parentId === null ? isNull(files.folderId) : eq(files.folderId, parentId),
       ),
     )

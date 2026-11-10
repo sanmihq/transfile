@@ -11,6 +11,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { verifyPassword } from "../auth/password";
 import { files, folders, shares } from "../db/schema";
+import { notExpired } from "../lib/files";
 import type { FolderDatabase } from "../lib/folders";
 import { getAncestors, getOwnedFolder } from "../lib/folders";
 import {
@@ -142,6 +143,7 @@ async function loadReadyFile(
         eq(files.userId, userId),
         eq(files.status, "ready"),
         isNull(files.deletedAt),
+        notExpired(),
       ),
     )
     .limit(1);
@@ -296,6 +298,7 @@ publicRouter.get("/:token/contents", async (c) => {
         eq(files.folderId, folder.id),
         eq(files.status, "ready"),
         isNull(files.deletedAt),
+        notExpired(),
       ),
     )
     .orderBy(asc(files.name));

@@ -15,7 +15,7 @@ Test password hashing against the free Worker CPU limit early.
 ## App tables
 folders(id, user_id, parent_id NULL, name, created_at)
 files(id, user_id, folder_id NULL, name, r2_key, size, mime,
-      status[pending|ready], created_at, deleted_at NULL)
+      status[pending|ready], created_at, deleted_at NULL, expires_at NULL)
 shares(id, file_id OR folder_id, token, password_hash NULL,
        expires_at, max_downloads NULL, download_count, revoked_at NULL)
 
@@ -41,5 +41,8 @@ Five failed unlocks lock that share for 15 minutes. Download grants last 5
 minutes and do not increment the counter again when the bytes are fetched.
 
 ## Cron (hourly)
-Delete expired shares; purge soft-deleted files >7 days from R2 + DB;
-remove stale `pending` uploads.
+Mark ready files past expiresAt as soft-deleted. After 7 days, delete their
+storage objects and then their rows. Remove pending uploads older than 2
+hours. Delete shares that expired or were revoked more than 7 days ago, and
+delete expired Better Auth sessions and verifications. Each run is bounded
+and safe to repeat.

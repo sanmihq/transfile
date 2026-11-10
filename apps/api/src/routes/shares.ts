@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { hashPassword } from "../auth/password";
 import { files, folders, shares } from "../db/schema";
+import { notExpired } from "../lib/files";
 import type { FolderDatabase } from "../lib/folders";
 import { getOwnedFolder } from "../lib/folders";
 import { generateToken, getShareState, type ShareState } from "../lib/shares";
@@ -59,7 +60,7 @@ async function targetNames(
     const found = await db
       .select({ id: files.id, name: files.name })
       .from(files)
-      .where(and(eq(files.userId, userId), inArray(files.id, ids)));
+      .where(and(eq(files.userId, userId), inArray(files.id, ids), notExpired()));
     for (const file of found) {
       fileNames.set(file.id, file.name);
     }
@@ -137,6 +138,7 @@ sharesRouter.post("/", async (c) => {
           eq(files.userId, userId),
           eq(files.status, "ready"),
           isNull(files.deletedAt),
+          notExpired(),
         ),
       )
       .limit(1);

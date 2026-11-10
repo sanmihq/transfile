@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { files, shares } from "../db/schema";
+import { notExpired } from "./files";
 import type { FolderDatabase } from "./folders";
 import { getOwnedFolder, getSubtreeIds } from "./folders";
 
@@ -56,6 +57,7 @@ export async function resolveTarget(
           eq(files.userId, share.userId),
           eq(files.status, "ready"),
           isNull(files.deletedAt),
+          notExpired(),
         ),
       )
       .limit(1);

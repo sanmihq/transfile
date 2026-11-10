@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
+import { runCleanup } from "./cron/cleanup";
 import { requireAuth, type AuthVariables } from "./middleware/auth";
 import { filesRouter, usageRouter } from "./routes/files";
 import { foldersRouter } from "./routes/folders";
@@ -46,4 +47,12 @@ app.onError((error, c) => {
   return c.json({ error: "Internal error" }, 500);
 });
 
-export default app;
+const worker = {
+  fetch: app.fetch,
+  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    void controller;
+    ctx.waitUntil(runCleanup(env, new Date()));
+  },
+} satisfies ExportedHandler<Env>;
+
+export default worker;

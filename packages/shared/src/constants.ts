@@ -11,3 +11,7 @@ export const SHARE_PASSWORD_MAX = 128;
 export const MAX_UNLOCK_ATTEMPTS = 5;
 export const UNLOCK_LOCKOUT_MINUTES = 15;
 export const MAX_ACTIVE_SHARES_PER_USER = 200;
+export const MAX_FILE_EXPIRY_DAYS = 365;
+export const SOFT_DELETE_RETENTION_DAYS = 7;
+export const PENDING_UPLOAD_TTL_HOURS = 2;
+export const SHARE_RETENTION_AFTER_END_DAYS = 7;

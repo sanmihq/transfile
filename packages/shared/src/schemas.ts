@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   DEFAULT_SHARE_HOURS,
   MAX_FILE_BYTES,
+  MAX_FILE_EXPIRY_DAYS,
   MAX_FILENAME_LENGTH,
   MAX_FOLDER_NAME_LENGTH,
   MAX_SHARE_DOWNLOADS,
@@ -13,21 +14,31 @@ import {
 const fileNameSchema = z.string().trim().min(1).max(MAX_FILENAME_LENGTH);
 const folderIdSchema = z.string().min(1).nullable();
 
+const fileExpirySchema = z.number().int().min(1).max(MAX_FILE_EXPIRY_DAYS);
+
 export const uploadRequestSchema = z.object({
   name: fileNameSchema,
   size: z.number().int().min(1).max(MAX_FILE_BYTES),
   mime: z.string().max(255).optional(),
   folderId: folderIdSchema.optional(),
+  expiresInDays: fileExpirySchema.optional(),
 });
 
 export const updateFileSchema = z
   .object({
     name: fileNameSchema.optional(),
     folderId: folderIdSchema.optional(),
+    expiresInDays: fileExpirySchema.nullable().optional(),
   })
-  .refine((value) => value.name !== undefined || value.folderId !== undefined, {
-    message: "At least one field is required",
-  });
+  .refine(
+    (value) =>
+      value.name !== undefined ||
+      value.folderId !== undefined ||
+      value.expiresInDays !== undefined,
+    {
+      message: "At least one field is required",
+    },
+  );
 
 export const listFilesQuerySchema = z.object({
   folderId: z

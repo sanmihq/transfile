@@ -43,10 +43,12 @@ export const files = sqliteTable(
       .notNull()
       .$defaultFn(now),
     deletedAt: integer("deleted_at", { mode: "timestamp" }),
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
   },
   (table) => [
     index("files_user_id_idx").on(table.userId),
     index("files_folder_id_idx").on(table.folderId),
+    index("files_expires_at_idx").on(table.expiresAt),
   ],
 );
 
