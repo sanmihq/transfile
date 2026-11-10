@@ -30,14 +30,17 @@ function Get-Response {
     [string]$InFile,
     [string]$OutFile,
     [hashtable]$ExtraHeaders,
-    [switch]$Public
+    [switch]$Public,
+    [switch]$Direct
   )
-  $headers = @{ Origin = $origin }
+  $headers = @{}
+  if (-not $Direct) { $headers["Origin"] = $origin }
   if ($null -ne $ExtraHeaders) {
     foreach ($key in @($ExtraHeaders.Keys)) { $headers[$key] = [string]$ExtraHeaders[$key] }
   }
-  $params = @{ Method = $Method; Uri = $Uri; Headers = $headers }
-  if ($null -ne $Session -and -not $Public) { $params.WebSession = $Session }
+  $params = @{ Method = $Method; Uri = $Uri }
+  if ($headers.Count -gt 0) { $params.Headers = $headers }
+  if ($null -ne $Session -and -not $Public -and -not $Direct) { $params.WebSession = $Session }
   if ($Body -ne "") { $params.ContentType = "application/json"; $params.Body = $Body }
   if ($InFile -ne "") { $params.InFile = $InFile }
   if ($OutFile -ne "") { $params.OutFile = $OutFile }
@@ -81,7 +84,13 @@ function Send-ReadyFile {
   $json = $created.Content | ConvertFrom-Json
   $direct = ([Uri]$json.upload.url).Host -ne ([Uri]$base).Host
   if ($direct) {
-    $put = Get-Response -Method PUT -Uri $json.upload.url -InFile $Path -Public
+    $uploadHeaders = @{}
+    if ($null -ne $json.upload.headers) {
+      foreach ($property in $json.upload.headers.PSObject.Properties) {
+        $uploadHeaders[$property.Name] = [string]$property.Value
+      }
+    }
+    $put = Get-Response -Method PUT -Uri $json.upload.url -InFile $Path -ExtraHeaders $uploadHeaders -Direct
   } else {
     $put = Get-Response -Method PUT -Uri $json.upload.url -Session $Session -InFile $Path
   }
@@ -144,7 +153,15 @@ $saved = $false
 $hashOk = $false
 if ($downloadMeta.Status -eq 200) {
   $downloadUrl = [string]($downloadMeta.Content | ConvertFrom-Json).url
-  Get-Response -Uri $downloadUrl -OutFile $downloaded -Public | Out-Null
+  $downloadUri = [Uri]$downloadUrl
+  $crossHost = $downloadUri.Host -ne ([Uri]$base).Host
+  if ($crossHost) {
+    $tokenInPath = $downloadUri.AbsolutePath.Contains($openToken)
+    Write-Check "share download url is presigned on another host" (-not $tokenInPath) "pathHasToken=$tokenInPath"
+    Get-Response -Uri $downloadUrl -OutFile $downloaded -Direct | Out-Null
+  } else {
+    Get-Response -Uri $downloadUrl -OutFile $downloaded -Public | Out-Null
+  }
   if (Test-Path $downloaded) {
     $saved = $true
     $hashOk = (Get-FileHash -Algorithm SHA256 -Path $source).Hash -eq (Get-FileHash -Algorithm SHA256 -Path $downloaded).Hash
