@@ -5,7 +5,6 @@ import { AppIcon, type AppIconName } from "@/components/icons"
 import { LinkDetail } from "@/components/product/link-detail"
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/product/states"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { markCommentsRead, markNotificationsRead, useCommentFeed, useNotifications } from "@/hooks/use-library"
 import { friendlyError } from "@/lib/errors"
 import { formatAgo } from "@/lib/format"
@@ -17,11 +16,24 @@ import {
   type CommentRecord,
   type NotificationRecord,
 } from "@/lib/schemas"
+import { cn } from "@/lib/utils"
 
 type Filter = "all" | "comments" | "activity"
 
+const kindLabel: Record<NotificationRecord["type"], string> = {
+  share_opened: "Opened",
+  file_downloaded: "Download",
+  share_locked: "Locked",
+  comment_received: "Comment",
+  share_expiring: "Expiring",
+  share_expired: "Expired",
+  files_expired: "Files expired",
+}
+
+const compact = "h-9 px-3 text-[13px] font-medium"
+
 type FeedItem =
-  | { kind: "notification"; id: string; createdAt: string; unread: boolean; shareId: string | null; title: string; type: NotificationRecord["type"] }
+  | { kind: "notification"; id: string; createdAt: string; unread: boolean; shareId: string | null; title: string; body: string | null; type: NotificationRecord["type"] }
   | { kind: "comment"; id: string; createdAt: string; unread: boolean; shareId: string; title: string; body: string }
 
 const iconFor: Record<NotificationRecord["type"], AppIconName> = {
@@ -29,8 +41,8 @@ const iconFor: Record<NotificationRecord["type"], AppIconName> = {
   file_downloaded: "download",
   share_locked: "lock",
   comment_received: "comment",
-  share_expiring: "clock",
-  share_expired: "clock",
+  share_expiring: "clockFading",
+  share_expired: "clockFading",
   files_expired: "alert",
 }
 
@@ -54,6 +66,7 @@ export default function InboxPage() {
       unread: item.readAt === null,
       shareId: item.shareId,
       title: item.title,
+      body: item.body,
       type: item.type,
     })),
     ...commentItems.map((item) => ({
@@ -118,17 +131,30 @@ export default function InboxPage() {
     <div className="grid gap-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="display-lg">Inbox</h1>
-        <Button type="button" variant="secondary" onClick={() => void markAll()}>
+        <Button type="button" variant="secondary" className={compact} onClick={() => void markAll()}>
           Mark all read
         </Button>
       </div>
-      <Tabs value={filter} onValueChange={(value) => setFilter(value as Filter)}>
-        <TabsList>
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="comments">Comments</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter inbox">
+        {(
+          [
+            ["all", "All"],
+            ["comments", "Comments"],
+            ["activity", "Activity"],
+          ] as const
+        ).map(([value, label]) => (
+          <Button
+            key={value}
+            type="button"
+            variant={filter === value ? "dark" : "secondary"}
+            className={compact}
+            aria-pressed={filter === value}
+            onClick={() => setFilter(value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
       {pending ? <LoadingBlock label="Loading inbox" /> : null}
       {failed ? (
         <ErrorState
@@ -140,34 +166,35 @@ export default function InboxPage() {
         />
       ) : null}
       {!pending && !failed && visible.length === 0 ? (
-        <EmptyState title="Nothing here yet" body="Downloads, comments, and link activity will show up here." />
+        <EmptyState icon="inbox" title="Nothing here yet" body="Downloads, comments, and link activity will show up here." />
       ) : null}
-      <ul className="grid gap-2">
+      <ul className="grid">
         {visible.map((item) => (
-          <li key={`${item.kind}-${item.id}`}>
+          <li key={`${item.kind}-${item.id}`} className="border-b border-border last:border-b-0">
             <button
               type="button"
-              className="flex w-full items-start gap-3 rounded-card bg-background p-3 text-left"
+              className="flex w-full items-center gap-3 py-3 text-left"
               onClick={() => {
                 if (item.shareId) setShareId(item.shareId)
               }}
             >
-              <span
-                className={`mt-1 size-2 shrink-0 rounded-inset bg-coral ${item.unread ? "" : "invisible"}`}
-                aria-hidden="true"
-              />
-              {item.kind === "notification" ? <AppIcon name={iconFor[item.type]} size={18} /> : <AppIcon name="comment" size={18} />}
-              <span className="min-w-0">
-                <span className="block font-bold text-ink">{item.title}</span>
-                {item.kind === "comment" ? <span className="block text-sm">{item.body}</span> : null}
-                <span className="block text-xs text-muted-foreground">{formatAgo(item.createdAt)}</span>
+              <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-inset bg-background", item.unread ? "text-brand" : "text-ink")}>
+                <AppIcon name={item.kind === "notification" ? iconFor[item.type] : "comment"} />
               </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs text-muted-foreground">
+                  {item.kind === "comment" ? "Comment" : kindLabel[item.type]}
+                </span>
+                <span className="block truncate text-sm font-medium text-ink">{item.title}</span>
+                {item.body ? <span className="block truncate text-sm text-muted-foreground">{item.body}</span> : null}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">{formatAgo(item.createdAt)}</span>
             </button>
           </li>
         ))}
       </ul>
       {visible.length > 0 ? (
-        <Button type="button" variant="secondary" loading={loadingMore} onClick={() => void loadMore()}>
+        <Button type="button" variant="secondary" className={compact} loading={loadingMore} onClick={() => void loadMore()}>
           Load older
         </Button>
       ) : null}

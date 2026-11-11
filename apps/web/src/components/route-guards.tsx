@@ -2,8 +2,9 @@ import { Suspense, useEffect } from "react"
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { AuthSkeleton } from "@/components/layout/skeletons"
-import { UploadDock } from "@/components/product/upload-panel"
+import { AppShell } from "@/components/layout/app-shell"
+import { PublicLayout } from "@/components/layout/public-layout"
+import { AuthSkeleton, PageSkeleton, SendSkeleton } from "@/components/layout/skeletons"
 import { authClient, useSession } from "@/lib/auth-client"
 import { returnPathFromState, safeReturnPath } from "@/lib/return-path"
 import { isMember } from "@/lib/session"
@@ -51,7 +52,13 @@ export function GuestOnly() {
 export function RequireAuth() {
   const { data, isPending } = useSession()
   const location = useLocation()
-  if (isPending) return <AuthSkeleton />
+  if (isPending) {
+    return (
+      <AppShell>
+        <PageSkeleton />
+      </AppShell>
+    )
+  }
   if (!isMember(data?.user)) {
     return (
       <Navigate
@@ -64,14 +71,36 @@ export function RequireAuth() {
   return <Outlet />
 }
 
+function RouteSkeleton() {
+  const { pathname } = useLocation()
+  if (pathname === "/") {
+    return (
+      <PublicLayout>
+        <SendSkeleton />
+      </PublicLayout>
+    )
+  }
+  if (pathname === "/login" || pathname === "/signup") {
+    return (
+      <PublicLayout>
+        <AuthSkeleton />
+      </PublicLayout>
+    )
+  }
+  return (
+    <AppShell>
+      <PageSkeleton />
+    </AppShell>
+  )
+}
+
 export function RootLayout() {
   return (
     <>
       <SessionEvents />
-      <Suspense fallback={<AuthSkeleton />}>
+      <Suspense fallback={<RouteSkeleton />}>
         <Outlet />
       </Suspense>
-      <UploadDock />
     </>
   )
 }

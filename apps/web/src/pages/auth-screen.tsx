@@ -142,19 +142,19 @@ export function AuthScreen({ mode }: { mode: Mode }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-sm items-center justify-center py-6">
+    <div className="mx-auto flex min-h-dvh w-full max-w-xl items-center justify-center px-4 py-24">
       <PageTransition>
-        <Surface radius="card" padding={12} className="on-sky w-full bg-background shadow-soft">
+        <Surface radius="sheet" padding={20} className="w-full bg-background text-foreground shadow-soft">
           <Wordmark />
           <h1 className="display-lg mt-8">
             {mode === "login" ? "Welcome back" : "Create your account"}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 max-w-sm text-sm text-muted-foreground sm:text-base">
             {mode === "login"
               ? "Sign in with your email and password."
               : "Use your name, email, and a password to get started."}
           </p>
-          <form className="mt-8 grid gap-4" noValidate onSubmit={onSubmit}>
+          <form className="mt-8 grid gap-5" noValidate onSubmit={onSubmit}>
             {mode === "signup" ? (
               <Field label="Name" htmlFor="name" error={messageFor("name")}>
                 <Input
@@ -188,7 +188,7 @@ export function AuthScreen({ mode }: { mode: Mode }) {
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   onClick={() => setShowPassword((current) => !current)}
                 >
-                  <AppIcon name={showPassword ? "eyeoff" : "eye"} size={18} />
+                  <AppIcon name={showPassword ? "eyeoff" : "eye"} />
                 </button>
               }
             >
@@ -211,11 +211,11 @@ export function AuthScreen({ mode }: { mode: Mode }) {
                 {formError}
               </div>
             ) : null}
-            <Button type="submit" className="w-full" loading={submitting} disabled={submitting}>
+            <Button type="submit" size="lg" className="mt-1 w-full" loading={submitting} disabled={submitting}>
               {mode === "login" ? "Sign in" : "Create account"}
             </Button>
           </form>
-          <p className="mt-6 text-center text-sm text-muted-foreground">
+          <p className="mt-6 border-t border-border pt-5 text-center text-sm text-muted-foreground">
             {mode === "login" ? (
               <>
                 Need an account?{" "}

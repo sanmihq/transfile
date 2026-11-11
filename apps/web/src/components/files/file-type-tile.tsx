@@ -1,22 +1,35 @@
 import { extensionLabel, getFileKind, type FileKind } from "@/components/files/file-kind"
+import { AppIcon, type AppIconName } from "@/components/icons"
 import { cn } from "@/lib/utils"
 
-const kindClass: Record<FileKind, string> = {
-  image: "bg-blush text-coral",
-  video: "bg-brand-soft text-brand-strong",
-  audio: "bg-lavender text-lavender-ink",
-  document: "bg-lemon text-ink",
-  sheet: "bg-mint text-mint-ink",
-  slides: "bg-blush text-coral",
-  archive: "bg-lavender text-lavender-ink",
-  code: "bg-surface-strong text-ink",
-  other: "bg-surface text-muted-foreground",
+const kindIcon: Record<FileKind, AppIconName> = {
+  image: "fileImage",
+  video: "fileVideo",
+  audio: "fileAudio",
+  document: "fileText",
+  sheet: "fileSheet",
+  slides: "fileSlides",
+  archive: "fileArchive",
+  code: "fileCode",
+  other: "file",
+}
+
+const kindInk: Record<FileKind, string> = {
+  image: "text-brand",
+  video: "text-lavender-ink",
+  audio: "text-mint-ink",
+  document: "text-coral",
+  sheet: "text-mint-ink",
+  slides: "text-coral",
+  archive: "text-lavender-ink",
+  code: "text-ink",
+  other: "text-muted-foreground",
 }
 
 const sizeClass = {
-  sm: "size-10 text-[10px]",
-  md: "size-16 text-sm",
-  lg: "size-24 text-base",
+  sm: "size-10",
+  md: "size-16",
+  lg: "size-24",
 } as const
 
 export function FileTypeTile({
@@ -33,14 +46,15 @@ export function FileTypeTile({
   const kind = getFileKind(name, mime)
   return (
     <span
+      aria-label={`${extensionLabel(name)} file`}
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-inset font-bold uppercase",
+        "flex shrink-0 items-center justify-center rounded-inset bg-background",
         sizeClass[size],
-        kindClass[kind],
+        kindInk[kind],
         className,
       )}
     >
-      {extensionLabel(name)}
+      <AppIcon name={kindIcon[kind]} />
     </span>
   )
 }

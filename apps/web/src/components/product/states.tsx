@@ -1,30 +1,36 @@
 import type { ReactNode } from "react"
+import { AppIcon, type AppIconName } from "@/components/icons"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListSkeleton } from "@/components/layout/skeletons"
 
 export function LoadingBlock({ label = "Loading" }: { label?: string }) {
   return (
-    <div className="grid gap-3" role="status" aria-label={label}>
-      <Skeleton className="h-12 w-full" />
-      <Skeleton className="h-12 w-full" />
-      <Skeleton className="h-12 w-2/3" />
+    <div role="status" aria-label={label}>
+      <ListSkeleton />
     </div>
   )
 }
 
 export function EmptyState({
+  icon,
   title,
   body,
   action,
 }: {
+  icon: AppIconName
   title: string
   body: string
   action?: ReactNode
 }) {
   return (
-    <div className="grid gap-2 py-8 text-center">
-      <p className="text-lg font-bold text-ink">{title}</p>
-      <p className="text-sm text-muted-foreground">{body}</p>
+    <div className="grid justify-items-center gap-3 px-4 py-16 text-center">
+      <span className="flex size-12 items-center justify-center rounded-inset bg-surface text-brand">
+        <AppIcon name={icon} />
+      </span>
+      <div className="grid max-w-sm gap-1">
+        <p className="text-base font-semibold text-ink">{title}</p>
+        <p className="text-sm text-muted-foreground">{body}</p>
+      </div>
       {action}
     </div>
   )

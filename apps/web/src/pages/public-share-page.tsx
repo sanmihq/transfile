@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent, type ReactNode } from "react"
 import { COMMENT_MAX, createCommentSchema } from "@transfile/shared"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useParams } from "react-router-dom"
@@ -103,22 +103,44 @@ export default function PublicSharePage() {
   }
 
   if (token.length === 0) {
-    return <EmptyState title="Link not found" body="This link is not valid." />
+    return (
+      <DownloadFrame>
+        <EmptyState icon="alert" title="Link not found" body="This link is not valid." />
+      </DownloadFrame>
+    )
   }
-  if (meta.isPending) return <LoadingBlock label="Loading link" />
+  if (meta.isPending) {
+    return (
+      <DownloadFrame>
+        <LoadingBlock label="Loading link" />
+      </DownloadFrame>
+    )
+  }
   if (meta.isError) {
     if (meta.error instanceof ApiError && meta.error.status === 404) {
-      return <EmptyState title="Link not found" body="This link does not exist." />
+      return (
+        <DownloadFrame>
+          <EmptyState icon="alert" title="Link not found" body="This link does not exist." />
+        </DownloadFrame>
+      )
     }
     if (meta.error instanceof ApiError && meta.error.status === 410) {
-      return <EmptyState title="This link is no longer available" body="It may have expired, been revoked, or reached its download limit." />
+      return (
+        <DownloadFrame>
+          <EmptyState icon="clockFading" title="This link is no longer available" body="It may have expired, been revoked, or reached its download limit." />
+        </DownloadFrame>
+      )
     }
-    return <ErrorState message={friendlyError(meta.error)} onRetry={() => void meta.refetch()} />
+    return (
+      <DownloadFrame>
+        <ErrorState message={friendlyError(meta.error)} onRetry={() => void meta.refetch()} />
+      </DownloadFrame>
+    )
   }
   if (!meta.data) return null
   if (meta.data.requiresPassword && !ready) {
     return (
-      <Surface radius="card" padding={20} className="mx-auto max-w-md bg-background">
+      <DownloadFrame>
         <h1 className="display-md">This link is locked</h1>
         <form className="mt-4 grid gap-3" onSubmit={(event) => void unlock(event)}>
           <Field label="Password" htmlFor="share-password" error={passwordError ?? undefined}>
@@ -135,11 +157,11 @@ export default function PublicSharePage() {
               Try again in {lockSeconds}s
             </p>
           ) : null}
-          <Button type="submit" loading={unlocking} disabled={lockSeconds > 0}>
+          <Button type="submit" className="w-full" loading={unlocking} disabled={lockSeconds > 0}>
             Unlock
           </Button>
         </form>
-      </Surface>
+      </DownloadFrame>
     )
   }
 
@@ -159,8 +181,8 @@ export default function PublicSharePage() {
   const totalSize = files.reduce((sum, file) => sum + file.size, 0)
 
   return (
-    <div className="grid gap-8">
-      <Surface radius="card" padding={20} className="bg-background">
+    <DownloadFrame>
+    <div className="grid gap-4">
         <h1 className="display-lg">{ready.type === "file" ? ready.name : (ready.title ?? ready.name)}</h1>
         {ready.message ? <p className="mt-3 text-base">{ready.message}</p> : null}
         <p className="mt-3 text-sm text-muted-foreground">
@@ -173,9 +195,9 @@ export default function PublicSharePage() {
           <ErrorState message="Could not load these files" onRetry={() => void contents.refetch()} />
         ) : null}
         {files.length === 0 && !contents.isPending ? (
-          <EmptyState title="No files" body="This link does not have any files yet." />
+          <EmptyState icon="folder" title="No files" body="This link does not have any files yet." />
         ) : null}
-        <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+        <ul className="mt-4 grid gap-3">
           {files.map((file) => (
             <li key={file.id} className="flex items-center gap-3 rounded-inset bg-surface p-3">
               {file.previewable ? (
@@ -210,13 +232,23 @@ export default function PublicSharePage() {
             </li>
           ))}
         </ul>
-      </Surface>
       {ready.allowComments ? <CommentBox token={token} access={access} /> : null}
       <Surface radius="card" padding={20} className="bg-brand text-brand-foreground">
         <h2 className="display-md">Send your own files</h2>
         <Button type="button" variant="dark" className="mt-4" asChild>
           <Link to="/">Start a transfer</Link>
         </Button>
+      </Surface>
+    </div>
+    </DownloadFrame>
+  )
+}
+
+function DownloadFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-dvh items-center px-4 py-24 md:px-10">
+      <Surface radius="card" padding={20} className="w-full max-w-xl bg-background text-foreground shadow-soft">
+        {children}
       </Surface>
     </div>
   )
@@ -288,14 +320,14 @@ function CommentBox({ token, access }: { token: string; access: string | null })
 
   if (sent) {
     return (
-      <Surface radius="card" padding={20} className="bg-background">
+      <Surface radius="card" padding={20} className="bg-surface">
         <p className="display-md">Sent</p>
       </Surface>
     )
   }
 
   return (
-    <Surface radius="card" padding={20} className="bg-background">
+    <Surface radius="card" padding={20} className="bg-surface">
       <h2 className="display-md">Leave a note</h2>
       <p className="mt-2 text-sm text-muted-foreground">
         Leave a note for the sender. Only they can read it.

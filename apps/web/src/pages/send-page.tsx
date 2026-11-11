@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react"
-import { MAX_FILE_BYTES, SHARE_PASSWORD_MIN, createTransferSchema } from "@transfile/shared"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { SHARE_PASSWORD_MIN, USER_QUOTA_BYTES, createTransferSchema } from "@transfile/shared"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { useDropzone } from "react-dropzone"
 import { toast } from "sonner"
 import { FileTypeTile } from "@/components/files/file-type-tile"
-import { HeroCollage } from "@/components/landing/hero-collage"
 import { AppIcon } from "@/components/icons"
 import { LiveCountdown } from "@/components/product/expiry-chip"
 import { useGuestToken } from "@/lib/guest-token"
@@ -14,16 +13,25 @@ import { copyText } from "@/lib/clipboard"
 import { ShareFields } from "@/components/product/share-fields"
 import { emptyShareDraft, shareBody, type ShareDraft } from "@/lib/share-draft"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Field } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Surface } from "@/components/ui/surface"
 import { Textarea } from "@/components/ui/textarea"
+import { EXPIRY_CHOICES } from "@/lib/expiry"
 import { useUpload } from "@/features/upload/context"
 import { useSession } from "@/lib/auth-client"
 import { friendlyError } from "@/lib/errors"
 import { ensureSession } from "@/lib/guest"
-import { formatBytes } from "@/lib/format"
+import { formatBytes, formatExpiryChoice } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { keys } from "@/lib/keys"
 import { readJson } from "@/lib/read"
 import { shareCreatedSchema, transferCreatedSchema, usageSchema } from "@/lib/schemas"
@@ -45,6 +53,80 @@ export default function SendPage() {
   const [link, setLink] = useState<string | null>(null)
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [magnet, setMagnet] = useState<"files" | "folder" | null>(null)
+  const folderPicker = useRef<HTMLInputElement>(null)
+  const filesTile = useRef<HTMLButtonElement>(null)
+  const folderTile = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    const reach = 40
+
+    function poolPoint(rect: DOMRect, x: number, y: number) {
+      const insideX = Math.min(Math.max(x, rect.left), rect.right)
+      const insideY = Math.min(Math.max(y, rect.top), rect.bottom)
+      const dist = Math.hypot(x - insideX, y - insideY)
+      if (dist > reach) return null
+      return {
+        dist,
+        x: rect.width === 0 ? 50 : ((insideX - rect.left) / rect.width) * 100,
+        y: rect.height === 0 ? 50 : ((insideY - rect.top) / rect.height) * 100,
+      }
+    }
+
+    function paint(kind: "files" | "folder" | null, point?: { x: number; y: number }) {
+      const tiles = { files: filesTile.current, folder: folderTile.current }
+      for (const key of ["files", "folder"] as const) {
+        const tile = tiles[key]
+        if (!tile) continue
+        const on = key === kind
+        tile.dataset.magnet = on ? "on" : "off"
+        if (on && point) {
+          tile.style.setProperty("--pool-x", `${point.x}%`)
+          tile.style.setProperty("--pool-y", `${point.y}%`)
+        }
+      }
+      setMagnet((current) => (current === kind ? current : kind))
+    }
+
+    function onDragOver(event: DragEvent) {
+      if (!event.dataTransfer?.types.includes("Files")) return
+      const spots = (
+        [
+          ["files", filesTile.current],
+          ["folder", folderTile.current],
+        ] as const
+      )
+        .map(([kind, tile]) => {
+          if (!tile) return null
+          const point = poolPoint(tile.getBoundingClientRect(), event.clientX, event.clientY)
+          return point ? { kind, point } : null
+        })
+        .filter((spot) => spot !== null)
+        .sort((a, b) => a.point.dist - b.point.dist)
+      const nearest = spots[0]
+      if (!nearest) {
+        paint(null)
+        return
+      }
+      event.preventDefault()
+      event.dataTransfer.dropEffect = "copy"
+      paint(nearest.kind, nearest.point)
+    }
+
+    function clearMagnet() {
+      paint(null)
+    }
+
+    window.addEventListener("dragover", onDragOver)
+    window.addEventListener("dragend", clearMagnet)
+    window.addEventListener("drop", clearMagnet)
+    return () => {
+      window.removeEventListener("dragover", onDragOver)
+      window.removeEventListener("dragend", clearMagnet)
+      window.removeEventListener("drop", clearMagnet)
+    }
+  }, [])
 
   const dropzone = useDropzone({
     noClick: true,
@@ -64,6 +146,7 @@ export default function SendPage() {
     setLink(null)
     setExpiresAt(null)
     setError(null)
+    setOptionsOpen(false)
   }
 
   async function getLink() {
@@ -72,8 +155,8 @@ export default function SendPage() {
       setError("Add a file first")
       return
     }
-    if (files.some((file) => file.size > MAX_FILE_BYTES)) {
-      setError("Each file must be 100 MB or smaller")
+    if (files.some((file) => file.size > USER_QUOTA_BYTES) || total > USER_QUOTA_BYTES) {
+      setError("The 100 MB limit covers everything you send")
       return
     }
     if (files.some((file) => file.size < 1)) {
@@ -129,182 +212,288 @@ export default function SendPage() {
   }
 
   return (
-    <div className="grid gap-16">
-      {!member ? (
-        <Surface radius="card" padding={16} className="bg-lemon">
-          <p className="text-sm text-ink">
-            Without an account you cannot track downloads or receive comments.{" "}
-            <Link to="/signup" className="font-bold text-brand">
-              Sign up
-            </Link>
-          </p>
-        </Surface>
-      ) : null}
-      <div className="grid items-start gap-8 lg:grid-cols-2">
-        <div className="order-1 lg:order-2">
-          <h1 className="display-xl">Send it. Keep it private.</h1>
-          <p className="mt-3 text-base text-muted-foreground">
-            Up to 100 MB per file and per account. Links last at most 3 days.
-          </p>
-          <HeroCollage />
-        </div>
-        <Surface
-          radius="card"
-          padding={16}
-          className="order-2 bg-background shadow-soft lg:order-1"
-          {...dropzone.getRootProps()}
-        >
-          <input {...dropzone.getInputProps()} aria-label="Add files" />
-          {phase === "done" && link ? (
-            <div className="grid gap-4">
-              <h2 className="display-md">Your link is ready</h2>
-              <div className="flex gap-2">
-                <Input readOnly value={link} aria-label="Share link" />
+    <div>
+      <section className="relative min-h-dvh">
+        <div className="relative z-10 flex min-h-dvh items-center px-4 py-24 md:px-8 lg:px-12">
+          <div className="grid w-full items-center gap-8 lg:grid-cols-[minmax(18rem,28rem)_minmax(0,1fr)] lg:gap-14">
+            <div className="order-1 max-w-xl lg:order-2">
+              <p className="w-fit rounded-control bg-cloud/15 px-3 py-2 text-xs font-medium text-cloud">
+                Private by default
+              </p>
+              <h1 className="display-hero mt-4 text-cloud">Send files. Keep them private.</h1>
+              <p className="mt-3 max-w-md text-sm text-cloud/80 sm:text-base">
+                Send a file or a whole folder. Add a password, set an expiry, and share one link. You can send up to 100 MB in total, and links last at most 3 days.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => {
-                    void copyText(link).then(() => toast.success("Link copied"))
-                  }}
+                  className="bg-background text-ink hover:bg-surface"
+                  onClick={() => document.getElementById("transfer")?.scrollIntoView({ behavior: "smooth", block: "center" })}
                 >
-                  Copy
+                  Start sending
                 </Button>
+                {member ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="border border-cloud/80 bg-transparent text-cloud hover:bg-cloud/15"
+                    asChild
+                  >
+                    <Link to="/files">Your files</Link>
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="border border-cloud/80 bg-transparent text-cloud hover:bg-cloud/15"
+                    asChild
+                  >
+                    <Link to="/signup">Sign up</Link>
+                  </Button>
+                )}
               </div>
-              <QrTile value={link} />
-              {expiresAt ? (
-                <p className="text-sm text-muted-foreground">
-                  <LiveCountdown expiresAt={expiresAt} />
-                </p>
-              ) : null}
-              <Button type="button" variant="secondary" onClick={reset}>
-                Send another
-              </Button>
+              <ol className="mt-6 grid list-none gap-2 text-sm text-cloud/85">
+                <li>1. Add your files</li>
+                <li>2. Choose who can open them</li>
+                <li>3. Share the link</li>
+              </ol>
             </div>
-          ) : (
-            <div className="grid gap-4">
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="soft" onClick={dropzone.open}>
-                  <AppIcon name="plus" size={18} />
-                  Add files
-                </Button>
-              </div>
-              {files.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  Drop files here. 100 MB each.
-                </p>
-              ) : (
-                <ul className="grid gap-2">
-                  {files.map((file, index) => (
-                    <li key={`${file.name}-${file.size}-${index}`} className="flex items-center gap-2 rounded-inset bg-surface p-2">
-                      <FileTypeTile name={file.name} mime={file.type} size="sm" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-bold text-ink">{file.name}</p>
-                        <p className="text-xs text-muted-foreground">{formatBytes(file.size)}</p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={`Remove ${file.name}`}
-                        onClick={() => setFiles((current) => current.filter((_, item) => item !== index))}
-                      >
-                        <AppIcon name="close" size={16} />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <p className="text-xs text-muted-foreground">{formatBytes(total)} selected</p>
-              <Field label="Title" htmlFor="transfer-title">
-                <Input
-                  id="transfer-title"
-                  value={title}
-                  placeholder="Optional"
-                  onChange={(event) => setTitle(event.target.value)}
-                />
-              </Field>
-              <Field label="Message" htmlFor="transfer-message">
-                <Textarea
-                  id="transfer-message"
-                  value={draft.message}
-                  placeholder="Optional"
-                  maxLength={500}
-                  onChange={(event) => setDraft({ ...draft, message: event.target.value })}
-                />
-              </Field>
-              <ShareFields
-                draft={draft}
-                onChange={setDraft}
-                member={member}
-                idPrefix="send"
-                showMessage={false}
+            <Surface
+              {...dropzone.getRootProps({ id: "transfer" })}
+              radius="card"
+              padding={16}
+              className="order-2 w-full bg-background text-foreground shadow-soft lg:order-1"
+            >
+              <input {...dropzone.getInputProps()} aria-label="Add files" />
+              <input
+                ref={folderPicker}
+                type="file"
+                multiple
+                className="hidden"
+                aria-label="Add a folder"
+                {...{ webkitdirectory: "", directory: "" }}
+                onChange={(event) => {
+                  const chosen = event.target.files
+                  if (chosen && chosen.length > 0) setFiles((current) => [...current, ...chosen])
+                  event.target.value = ""
+                }}
               />
-              {phase === "working" ? (
-                <div className="grid gap-2" aria-live="polite">
-                  <Progress value={upload.progress} aria-label="Upload progress" />
-                  <p className="text-sm text-muted-foreground">
-                    {transferId ? "Creating the link" : `Uploading ${upload.progress}%`}
-                  </p>
+              {phase === "done" && link ? (
+                <div className="grid gap-4">
+                  <h2 className="display-md">Your link is ready</h2>
+                  <div className="flex gap-2">
+                    <Input readOnly value={link} aria-label="Share link" />
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        void copyText(link).then(() => toast.success("Link copied"))
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <QrTile value={link} />
+                  {expiresAt ? (
+                    <p className="text-sm text-muted-foreground">
+                      <LiveCountdown expiresAt={expiresAt} />
+                    </p>
+                  ) : null}
+                  <Button type="button" variant="secondary" className="w-full" onClick={reset}>
+                    Send another
+                  </Button>
                 </div>
-              ) : null}
-              {error ? <p className="text-sm text-coral" role="alert">{error}</p> : null}
-              <Button type="button" loading={phase === "working"} onClick={() => void getLink()}>
-                {transferId ? "Try the link again" : "Get link"}
-              </Button>
-            </div>
-          )}
-        </Surface>
-      </div>
-      {!member ? <Landing /> : null}
+              ) : (
+                <div className="grid gap-4">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      ref={filesTile}
+                      type="button"
+                      data-magnet={magnet === "files" ? "on" : "off"}
+                      onClick={dropzone.open}
+                      className="drop-pool flex flex-col items-center gap-2 rounded-inset bg-brand-tint px-3 py-8 text-brand outline-none transition-colors hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-ring data-[magnet=on]:ring-2 data-[magnet=on]:ring-brand"
+                    >
+                      <span className="drop-pool-mark flex size-11 items-center justify-center rounded-inset bg-brand text-brand-foreground transition-transform">
+                        <AppIcon name="plus" />
+                      </span>
+                      <span className="text-sm font-medium">{magnet === "files" ? "Drop files" : "Add files"}</span>
+                    </button>
+                    <button
+                      ref={folderTile}
+                      type="button"
+                      data-magnet={magnet === "folder" ? "on" : "off"}
+                      onClick={() => folderPicker.current?.click()}
+                      className="drop-pool flex flex-col items-center gap-2 rounded-inset bg-brand-tint px-3 py-8 text-brand outline-none transition-colors hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-ring data-[magnet=on]:ring-2 data-[magnet=on]:ring-brand"
+                    >
+                      <span className="drop-pool-mark flex size-11 items-center justify-center rounded-inset bg-brand text-brand-foreground transition-transform">
+                        <AppIcon name="folder" />
+                      </span>
+                      <span className="text-sm font-medium">{magnet === "folder" ? "Drop folder" : "Add folder"}</span>
+                    </button>
+                  </div>
+                  <p className="text-center text-xs text-muted-foreground">Drop files or a folder. 100 MB max.</p>
+                  {files.length > 0 ? (
+                    <ul className="grid min-w-0">
+                      {files.map((file, index) => {
+                        const extension = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() : ""
+                        return (
+                          <li key={`${file.name}-${file.size}-${index}`} className="group flex min-w-0 items-center gap-3 py-2">
+                            <FileTypeTile name={file.name} mime={file.type} size="sm" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-ink">{file.name}</p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {formatBytes(file.size)}
+                                {extension ? ` · ${extension}` : ""}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${file.name}`}
+                              className="flex max-w-0 items-center gap-2 overflow-hidden rounded-inset bg-coral py-2 text-xs font-medium whitespace-nowrap text-white opacity-0 transition-all outline-none group-hover:max-w-28 group-hover:px-2 group-hover:opacity-100 focus-visible:max-w-28 focus-visible:px-2 focus-visible:opacity-100"
+                              onClick={() => setFiles((current) => current.filter((_, item) => item !== index))}
+                            >
+                              <AppIcon name="close" />
+                              Remove
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  ) : null}
+                  <p className="text-center text-xs text-muted-foreground">
+                    {files.length > 0 ? `${formatBytes(total)} selected. ` : null}
+                    {member ? null : (
+                      <>
+                        <Link to="/signup" className="font-bold text-brand">
+                          Sign up
+                        </Link>{" "}
+                        to track downloads and receive comments.
+                      </>
+                    )}
+                  </p>
+                  <Field label="Title" htmlFor="transfer-title">
+                    <Input
+                      id="transfer-title"
+                      value={title}
+                      placeholder="Optional"
+                      onChange={(event) => setTitle(event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Message" htmlFor="transfer-message">
+                    <Textarea
+                      id="transfer-message"
+                      value={draft.message}
+                      placeholder="Optional"
+                      maxLength={500}
+                      onChange={(event) => setDraft({ ...draft, message: event.target.value })}
+                    />
+                  </Field>
+                  <div className="flex items-center gap-2">
+                    <AppIcon name="clockFading" />
+                    <Select
+                      value={String(draft.expiresInHours)}
+                      onValueChange={(value) => setDraft({ ...draft, expiresInHours: Number(value) })}
+                    >
+                      <SelectTrigger id="send-expiry" aria-label="Expiry" className="min-w-0 flex-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {EXPIRY_CHOICES.map((hours) => (
+                          <SelectItem key={hours} value={String(hours)}>
+                            {formatExpiryChoice(hours)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Popover open={optionsOpen} onOpenChange={setOptionsOpen}>
+                      <PopoverTrigger asChild>
+                        <Button type="button" size="icon" variant="secondary" aria-label="Transfer options">
+                          <AppIcon name="more" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        side="right"
+                        onInteractOutside={(event) => {
+                          const target = event.target
+                          if (target instanceof Element && target.closest("[data-slot=select-content]")) {
+                            event.preventDefault()
+                          }
+                        }}
+                      >
+                        <p className="px-1 pb-1 text-sm font-semibold">Options</p>
+                        <ShareFields
+                          draft={draft}
+                          onChange={setDraft}
+                          member={member}
+                          idPrefix="send"
+                          showMessage={false}
+                          showExpiry={false}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  {error ? (
+                    <p className="text-sm text-coral" role="alert">
+                      {error}
+                    </p>
+                  ) : null}
+                  <TransferButton
+                    working={phase === "working"}
+                    progress={transferId ? 100 : upload.progress}
+                    label={transferId ? "Creating the link" : phase === "working" ? `Uploading ${upload.progress}%` : "Transfer"}
+                    onClick={() => void getLink()}
+                  />
+                </div>
+              )}
+            </Surface>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
 
-function Landing() {
-  const features = [
-    {
-      title: "Private by default",
-      body: "Add a password and an expiry. Links last at most 72 hours.",
-      className: "bg-blush",
-    },
-    {
-      title: "Know when it lands",
-      body: "Members get a notification when someone opens or downloads a file.",
-      className: "bg-mint",
-    },
-    {
-      title: "Leave a note",
-      body: "Visitors can leave a comment that only you can read.",
-      className: "bg-lemon",
-    },
-  ]
+function TransferButton({
+  working,
+  progress,
+  label,
+  onClick,
+}: {
+  working: boolean
+  progress: number
+  label: string
+  onClick: () => void
+}) {
+  const amount = Math.min(100, Math.max(0, progress))
   return (
-    <div className="grid gap-16">
-      <section id="features" className="grid gap-4 md:grid-cols-3">
-        {features.map((feature) => (
-          <Surface key={feature.title} radius="card" padding={20} className={feature.className}>
-            <h2 className="display-md">{feature.title}</h2>
-            <p className="mt-3 text-sm text-ink">{feature.body}</p>
-          </Surface>
-        ))}
-      </section>
-      <section id="how" className="grid gap-4 md:grid-cols-3">
-        {["Add your files", "Choose who can open them", "Share the link"].map((step, index) => (
-          <Surface key={step} radius="card" padding={20} className="bg-background">
-            <p className="text-sm font-bold text-brand">{index + 1}</p>
-            <h2 className="display-md mt-2">{step}</h2>
-          </Surface>
-        ))}
-      </section>
-      <section id="security">
-        <Surface radius="card" padding={24} className="bg-brand text-brand-foreground">
-          <h2 className="display-lg">Send a private link</h2>
-          <p className="mt-2 text-sm">100 MB per file. Links expire within 3 days.</p>
-          <Button type="button" variant="dark" className="mt-4" asChild>
-            <a href="#transfer-title">Get a link</a>
-          </Button>
-        </Surface>
-      </section>
-    </div>
+    <Button
+      type="button"
+      size="lg"
+      className={cn(
+        "relative w-full overflow-hidden",
+        working && "bg-brand-tint text-ink hover:bg-brand-tint disabled:opacity-100",
+      )}
+      disabled={working}
+      aria-live="polite"
+      onClick={onClick}
+    >
+      {working ? (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 bg-brand transition-[width] duration-200"
+          style={{ width: `${amount}%` }}
+        />
+      ) : null}
+      <span className="relative">{label}</span>
+      {working ? (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 grid place-items-center text-brand-foreground"
+          style={{ clipPath: `inset(0 ${100 - amount}% 0 0)` }}
+        >
+          {label}
+        </span>
+      ) : null}
+    </Button>
   )
 }

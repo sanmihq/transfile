@@ -15,7 +15,7 @@ export default function SettingsPage() {
   return (
     <div className="grid gap-6">
       <h1 className="display-lg">Settings</h1>
-      <Surface radius="card" padding={24} className="bg-background">
+      <Surface radius="card" padding={24} className="bg-surface">
         <h2 className="display-md">Account</h2>
         <p className="mt-3 text-lg font-medium">{name}</p>
         <p className="mt-1 text-sm text-muted-foreground">{email}</p>
@@ -33,11 +33,11 @@ export default function SettingsPage() {
       >
         Sign out
       </Button>
-      <Surface id="about" radius="card" padding={24} className="bg-background">
+      <Surface id="about" radius="card" padding={24} className="bg-surface">
         <h2 className="display-md">About</h2>
         <p className="mt-3 text-sm text-muted-foreground">
-          <a href="https://heroicons.com" className="font-medium text-brand">
-            Icons by Heroicons
+          <a href="https://lucide.dev" className="font-medium text-brand">
+            Icons by Lucide
           </a>
         </p>
       </Surface>

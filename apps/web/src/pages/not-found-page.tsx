@@ -6,7 +6,8 @@ import { Surface } from "@/components/ui/surface"
 export default function NotFoundPage() {
   return (
     <PublicLayout>
-      <Surface radius="card" padding={24} className="on-sky mx-auto w-full max-w-sm bg-background text-center shadow-soft">
+      <div className="flex min-h-dvh items-center justify-center px-4 py-24">
+      <Surface radius="card" padding={24} className="mx-auto w-full max-w-sm bg-background text-center text-foreground shadow-soft">
         <p className="text-sm font-medium text-muted-foreground">404</p>
         <h1 className="display-lg mt-2">That page is missing</h1>
         <p className="mt-3 text-sm text-muted-foreground">
@@ -16,6 +17,7 @@ export default function NotFoundPage() {
           <Link to="/">Back home</Link>
         </Button>
       </Surface>
+      </div>
     </PublicLayout>
   )
 }

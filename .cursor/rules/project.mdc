@@ -28,7 +28,7 @@ UI:
   padding and publishes --parent-r and --parent-pad. Inner blocks use
   rounded-inset. Do not hard-code hex or radii outside index.css.
 - Headings use the display serif (Fraunces, weight 800). Body and UI stay Geist.
-- Icons are Heroicons through AppIcon only.
+- Icons are Lucide through AppIcon only. Size and stroke live on that component.
 - Palette tokens only. Brand blue is the primary action. Dark ink is the
   secondary action. Public pages may use the cloudy sky. The signed-in app
   stays on the light surface. No glows, gradient borders, or decorative motion.

@@ -28,27 +28,27 @@ function initials(name: string): string {
 
 function SignedOutCluster() {
   return (
-    <div className="fixed top-5 right-5 z-50 flex items-center gap-2">
+    <div className="fixed top-5 right-3 z-50 flex items-center gap-2 md:right-8">
       <Surface
         radius="card"
         padding={12}
         className="hidden items-center gap-1 bg-background shadow-soft md:flex"
       >
-        <Link to="/#features" className="rounded-inset px-3 py-2 text-sm font-bold text-ink">
+        <Link to="/#features" className="rounded-inset px-3 py-1.5 text-[13px] font-medium text-ink">
           Features
         </Link>
-        <Link to="/#how" className="rounded-inset px-3 py-2 text-sm font-bold text-ink">
+        <Link to="/#how" className="rounded-inset px-3 py-1.5 text-[13px] font-medium text-ink">
           How it works
         </Link>
-        <Link to="/#security" className="rounded-inset px-3 py-2 text-sm font-bold text-ink">
+        <Link to="/#security" className="rounded-inset px-3 py-1.5 text-[13px] font-medium text-ink">
           Security
         </Link>
       </Surface>
       <Surface radius="card" padding={12} className="flex items-center gap-1 bg-background shadow-soft">
-        <Button variant="ghost" size="sm" asChild className="rounded-inset">
+        <Button variant="ghost" size="sm" asChild className="h-9 rounded-inset px-3 text-[13px] font-medium">
           <Link to="/login">Log in</Link>
         </Button>
-        <Button variant="dark" size="sm" asChild className="rounded-inset">
+        <Button variant="dark" size="sm" asChild className="h-9 rounded-inset px-3 text-[13px] font-medium">
           <Link to="/signup">Sign up</Link>
         </Button>
       </Surface>
@@ -67,14 +67,14 @@ function SignedInCluster() {
   const quota = usage.data ? formatBytes(usage.data.quota) : "—"
 
   return (
-    <div className="fixed top-5 right-5 z-50">
+    <div className="fixed top-5 right-3 z-50 md:right-8">
       <DropdownMenu>
         <Surface radius="card" padding={12} className="bg-background shadow-soft">
           <DropdownMenuTrigger className="rounded-inset flex items-center gap-2 px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <Avatar>
               <AvatarFallback>{initials(name)}</AvatarFallback>
             </Avatar>
-            <span className="max-w-28 truncate text-sm font-bold text-ink">
+            <span className="max-w-28 truncate text-[13px] font-medium text-ink">
               {firstName(name)}
             </span>
           </DropdownMenuTrigger>

@@ -72,7 +72,7 @@ function DialogContent({
               className="absolute top-5 right-5"
               size="icon-sm"
             >
-              <AppIcon name="close" size={18} />
+              <AppIcon name="close" />
               <span className="sr-only">Close</span>
             </Button>
           </DialogPrimitive.Close>

@@ -84,6 +84,16 @@ export function expiryIsUrgent(
   return diff > 0 && diff < 6 * 60 * 60 * 1000
 }
 
+export function formatExpiryChoice(hours: number): string {
+  if (!Number.isFinite(hours) || hours < 1) return "Expired"
+  if (hours % 24 === 0) {
+    const days = hours / 24
+    return days === 1 ? "1 day" : `${days} days`
+  }
+  const whole = Math.round(hours)
+  return whole === 1 ? "1 hour" : `${whole} hours`
+}
+
 export function formatAgo(target: Date | number | string, now = new Date()): string {
   const date = asDate(target)
   if (!date) return "—"

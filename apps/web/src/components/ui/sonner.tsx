@@ -6,13 +6,13 @@ function Toaster({ ...props }: ToasterProps) {
   return (
     <Sonner
       theme="light"
-      className="toaster group"
+      className="toaster group font-sans"
       icons={{
-        success: <AppIcon name="check" size={16} />,
-        info: <AppIcon name="help" size={16} />,
-        warning: <AppIcon name="alert" size={16} />,
-        error: <AppIcon name="alert" size={16} />,
-        loading: <AppIcon name="clock" size={16} className="animate-spin" />,
+        success: <AppIcon name="check" />,
+        info: <AppIcon name="help" />,
+        warning: <AppIcon name="alert" />,
+        error: <AppIcon name="alert" />,
+        loading: <AppIcon name="clock" className="animate-spin" />,
       }}
       style={
         {
@@ -25,7 +25,7 @@ function Toaster({ ...props }: ToasterProps) {
       toastOptions={{
         classNames: {
           toast:
-            "rounded-card border-0 bg-background text-foreground shadow-soft",
+            "rounded-card border-0 bg-background font-sans text-foreground shadow-soft",
         },
       }}
       {...props}

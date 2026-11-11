@@ -13,6 +13,7 @@ export function PreviewThumb({
   cacheKey,
   headers,
   trackSession,
+  size = "md",
 }: {
   name: string
   mime?: string | null
@@ -21,6 +22,7 @@ export function PreviewThumb({
   cacheKey: string
   headers?: HeadersInit
   trackSession?: boolean
+  size?: "sm" | "md"
 }) {
   const [failed, setFailed] = useState(false)
   const preview = useQuery({
@@ -40,11 +42,11 @@ export function PreviewThumb({
         src={preview.data.url}
         alt=""
         loading="lazy"
-        className="size-16 rounded-inset object-cover"
+        className={size === "sm" ? "size-10 rounded-inset object-cover" : "size-16 rounded-inset object-cover"}
         onError={() => setFailed(true)}
       />
     )
   }
 
-  return <FileTypeTile name={name} mime={mime} size="md" />
+  return <FileTypeTile name={name} mime={mime} size={size} />
 }

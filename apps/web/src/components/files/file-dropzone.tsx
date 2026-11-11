@@ -34,10 +34,10 @@ export function FileDropzone({
           {isDragActive ? "Drop to upload" : "Drop files here"}
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Up to 100 MB each. They stay in your library until you delete them.
+          Up to 100 MB in total. They stay in your library until you delete them.
         </p>
         <Button type="button" variant="soft" className="mt-6" disabled={disabled} onClick={open}>
-          <AppIcon name="plus" size={18} />
+          <AppIcon name="plus" />
           Choose files
         </Button>
       </div>

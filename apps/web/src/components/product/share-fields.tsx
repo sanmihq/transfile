@@ -1,4 +1,6 @@
+import { useState } from "react"
 import { SHARE_PASSWORD_MIN } from "@transfile/shared"
+import { AppIcon } from "@/components/icons"
 import { Field } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
@@ -11,6 +13,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { EXPIRY_CHOICES } from "@/lib/expiry"
+import { formatExpiryChoice } from "@/lib/format"
 import type { ShareDraft } from "@/lib/share-draft"
 
 const limits = [
@@ -21,6 +24,40 @@ const limits = [
   { value: "50", label: "50" },
 ] as const
 
+function PasswordInput({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  const [visible, setVisible] = useState(false)
+  return (
+    <div className="relative">
+      <Input
+        id={id}
+        type={visible ? "text" : "password"}
+        autoComplete="new-password"
+        minLength={SHARE_PASSWORD_MIN}
+        aria-label="Password"
+        value={value}
+        className="pr-12"
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <button
+        type="button"
+        className="absolute top-1/2 right-2 flex size-8 -translate-y-1/2 items-center justify-center rounded-inset text-muted-foreground outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={visible ? "Hide password" : "Show password"}
+        onClick={() => setVisible((current) => !current)}
+      >
+        <AppIcon name={visible ? "eyeoff" : "eye"} />
+      </button>
+    </div>
+  )
+}
+
 export function ShareFields({
   draft,
   onChange,
@@ -28,6 +65,7 @@ export function ShareFields({
   choices = [...EXPIRY_CHOICES],
   idPrefix,
   showMessage = true,
+  showExpiry = true,
 }: {
   draft: ShareDraft
   onChange: (draft: ShareDraft) => void
@@ -35,49 +73,47 @@ export function ShareFields({
   choices?: number[]
   idPrefix: string
   showMessage?: boolean
+  showExpiry?: boolean
 }) {
   return (
     <div className="divide-y divide-border">
-      <div className="grid gap-2 py-3">
-        <Field label="Expiry" htmlFor={`${idPrefix}-expiry`}>
-          <Select
-            value={String(draft.expiresInHours)}
-            onValueChange={(value) => onChange({ ...draft, expiresInHours: Number(value) })}
-          >
-            <SelectTrigger id={`${idPrefix}-expiry`} aria-label="Expiry">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {choices.map((hours) => (
-                <SelectItem key={hours} value={String(hours)}>
-                  {hours}h
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <p className="text-xs text-muted-foreground">Links last at most 72 hours.</p>
-      </div>
+      {showExpiry ? (
+        <div className="grid gap-2 py-3">
+          <Field label="Expiry" htmlFor={`${idPrefix}-expiry`}>
+            <Select
+              value={String(draft.expiresInHours)}
+              onValueChange={(value) => onChange({ ...draft, expiresInHours: Number(value) })}
+            >
+              <SelectTrigger id={`${idPrefix}-expiry`} aria-label="Expiry">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {choices.map((hours) => (
+                  <SelectItem key={hours} value={String(hours)}>
+                    {formatExpiryChoice(hours)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <p className="text-xs text-muted-foreground">Links last at most 72 hours.</p>
+        </div>
+      ) : null}
       <div className="grid gap-3 py-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm font-medium">Password</span>
           <Switch
             checked={draft.passwordOn}
-            label="Password"
+            label="Require a password"
             onCheckedChange={(passwordOn) => onChange({ ...draft, passwordOn })}
           />
         </div>
         {draft.passwordOn ? (
-          <Field label="Password" htmlFor={`${idPrefix}-password`}>
-            <Input
-              id={`${idPrefix}-password`}
-              type="password"
-              autoComplete="new-password"
-              minLength={SHARE_PASSWORD_MIN}
-              value={draft.password}
-              onChange={(event) => onChange({ ...draft, password: event.target.value })}
-            />
-          </Field>
+          <PasswordInput
+            id={`${idPrefix}-password`}
+            value={draft.password}
+            onChange={(password) => onChange({ ...draft, password })}
+          />
         ) : null}
       </div>
       <div className="grid gap-2 py-3">

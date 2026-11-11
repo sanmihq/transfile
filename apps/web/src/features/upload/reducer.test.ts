@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { getFileKind } from "@/components/files/file-kind"
-import { formatBytes, formatExpiryCountdown } from "@/lib/format"
+import { formatBytes, formatExpiryChoice, formatExpiryCountdown } from "@/lib/format"
 import { overallProgress, uploadReducer, type UploadItem } from "@/features/upload/reducer"
 
 function item(overrides: Partial<UploadItem> = {}): UploadItem {
@@ -53,6 +53,15 @@ describe("formatExpiryCountdown", () => {
 
   it("says expired when the time has passed", () => {
     expect(formatExpiryCountdown(new Date(now.getTime() - 1000), now)).toBe("Expired")
+  })
+})
+
+describe("formatExpiryChoice", () => {
+  it("uses days when the choice lands on a day", () => {
+    expect(formatExpiryChoice(1)).toBe("1 hour")
+    expect(formatExpiryChoice(6)).toBe("6 hours")
+    expect(formatExpiryChoice(24)).toBe("1 day")
+    expect(formatExpiryChoice(72)).toBe("3 days")
   })
 })
 

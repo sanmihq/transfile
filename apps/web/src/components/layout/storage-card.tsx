@@ -14,7 +14,7 @@ export function StorageCard() {
   const usage = useUsage()
 
   return (
-    <Surface radius="card" padding={24} className="bg-background">
+    <Surface radius="card" padding={24} className="bg-surface">
       <h2 className="display-md">Storage</h2>
       {usage.isPending ? (
         <div className="mt-3 grid gap-2">

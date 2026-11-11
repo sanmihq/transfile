@@ -216,8 +216,8 @@ transfile/
 
 ## Credits
 
-Icons in the app are [Heroicons](https://heroicons.com) (MIT, Tailwind Labs).
+Icons in the app are [Lucide](https://lucide.dev) (ISC).
 
-[Fraunces](https://github.com/undercasetype/Fraunces) and [Geist](https://github.com/vercel/geist-font) are self-hosted through Fontsource and licensed under the [SIL Open Font License 1.1](https://scripts.sil.org/OFL).
+[Parkinsans](https://github.com/redstonedesign/parkinsans) is self-hosted through Fontsource and licensed under the [SIL Open Font License 1.1](https://scripts.sil.org/OFL).
 
 There is no `LICENSE` file. The root `package.json` currently says `"license": "ISC"`. Choose a license and add a `LICENSE` file before publishing the repo.
